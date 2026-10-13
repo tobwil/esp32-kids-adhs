@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "fonts.h"
+#include "pet.h"
 #include "rewards.h"
 
 namespace dk {
@@ -196,6 +197,7 @@ void Balance::tick(const TileInput& in) {
       if (all) {
         phase_ = DONE; t_ = 0;
         stars_ = starsAdd(store_);
+        petEvent(store_, "pe_play");
         inSession_++;
         level_ = (level_ + 1) % N_LEVELS;
         store_.set("bal_lvl", level_);

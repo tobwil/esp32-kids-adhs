@@ -7,41 +7,42 @@
 #include "checkin.h"
 #include "fonts.h"
 #include "horses.h"
+#include "icons.h"
 #include "rewards.h"
 
 namespace dk {
 
-static const Col TXT_DIM = hex(0x9a94b4), INK = hex(0x1c1228), EYE = hex(0xfbf8ff);
+static const Col TXT = hex(0xf2eefa), TXT_DIM = hex(0x9a94b4), INK = hex(0x1c1228), EYE = hex(0xfbf8ff);
 static const Col BODY_TOP = hex(0x86e3c9), BODY_BOT = hex(0x3aa98f), CHEEK = hex(0xff9ec0);
 static const Col ICON_BG = hex(0x1d2540), ICON_RIM = hex(0x2e3a62), GOLD = hex(0xffd166);
-static constexpr float ICON_R = 30;
-static constexpr float BUBBLE_Y = 22, BUBBLE_H = 42;
+static const Col NEED_COL[Pet::N_NEEDS] = {hex(0xffa64d), hex(0xff8fb8), hex(0x5fd8c8)};
+static constexpr float ICON_R = 30, NEED_R = 15;
+static constexpr float BUBBLE_Y = 58, BUBBLE_H = 40;
 
 static inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }
 static inline float approach(float v, float t, float rate, float dt) { return v + (t - v) * std::fmin(1.f, rate * dt); }
 static inline float smooth(float t) { t = clampf(t, 0, 1); return t * t * (3 - 2 * t); }
 
-static void heart(Scene& s, float x, float y, float r, Col c, float a) {
-  s.circle(x - r * 0.5f, y - r * 0.2f, r * 0.55f, c, a);
-  s.circle(x + r * 0.5f, y - r * 0.2f, r * 0.55f, c, a);
-  s.capsule(x - r * 0.9f, y + r * 0.05f, x, y + r * 0.95f, r * 0.28f, c, a);
-  s.capsule(x + r * 0.9f, y + r * 0.05f, x, y + r * 0.95f, r * 0.28f, c, a);
-  s.circle(x, y + r * 0.25f, r * 0.5f, c, a);
+Home::Home(Synth& synth, Store& store) : synth_(synth), store_(store) {
+  pet_.load(store_);
+  R_ = pet_.size();
 }
-
-Home::Home(Synth& synth, Store& store) : synth_(synth), store_(store) {}
 
 float Home::rnd() {
   seed_ ^= seed_ << 13; seed_ ^= seed_ >> 17; seed_ ^= seed_ << 5;
   return (seed_ & 0xFFFFFF) / float(0x1000000);
 }
 
-
 void Home::iconPos(int i, int n, float& x, float& y) {
   // erste Reihe drei, zweite Reihe der Rest, jeweils mittig
   const int row = i < 3 ? 0 : 1, inRow = row ? n - 3 : (n < 3 ? n : 3), k = row ? i - 3 : i;
   x = W / 2 + (k - (inRow - 1) * 0.5f) * 112;
-  y = row ? 372 : 268;
+  y = row ? 372 : 270;
+}
+
+void Home::needPos(int i, float& x, float& y) {
+  x = 132 + i * 48;
+  y = 30;
 }
 
 int Home::cardsWaiting() const {
@@ -49,43 +50,123 @@ int Home::cardsWaiting() const {
   return (earned < tot ? earned : tot) - store_.get("alb_open", 0);
 }
 
-void Home::say(const char* text, float secs) {
+bool Home::asleep() const {
+  if (epoch_ <= 0 || pet_.stage == Pet::EGG) return false;
+  const int h = int((epoch_ / 3600) % 24);
+  return h >= 20 || h < 7;   // Schlafenszeit 20 bis 7 Uhr (nur wenn die Uhrzeit bekannt ist)
+}
+
+void Home::say(const char* text, float secs, bool ask) {
   snprintf(bubble_, sizeof bubble_, "%s", text);
   bubbleT_ = bubbleDur_ = secs;
-  bubbleAsk_ = false;
+  bubbleAsk_ = ask;
+}
+
+void Home::feed() {
+  if (pet_.need[Pet::FOOD] > 0.9f) { say("Ich bin satt, danke!", 2); return; }
+  if (foodT_ >= 0 || chew_ > 0) return;
+  foodT_ = 0;
 }
 
 void Home::enter(uint32_t ms) {
-  if (!lastSeen_ || ms - lastSeen_ > 30000) { say("Hallo!", 2.2f); idle_ = 0; }   // nach längerer Pause begrüßen
-  else { bubbleT_ = 0; idle_ = 4; }
+  if (pet_.applyEvents(store_)) pet_.save(store_);
+  if (pet_.stage == Pet::EGG) { bubbleT_ = 0; }
+  else if (!lastSeen_ || ms - lastSeen_ > 30000) { say(asleep() ? "Gute Nacht!" : "Hallo!", 2.2f); askT_ = 4; }
+  else { bubbleT_ = 0; askT_ = 6; }
   sqv_ = 2.5f;   // kleiner Hüpfer
 }
 
 void Home::tick(const TileInput& in) {
   const float dt = in.dt;
   clock_ += dt;
-  idle_ += dt;
   lastSeen_ = in.ms;
+  epoch_ = in.epoch;
   bubbleT_ = std::fmax(0, bubbleT_ - dt);
   giggle_ = std::fmax(0, giggle_ - dt);
   dizzy_ = std::fmax(0, dizzy_ - dt);
   startle_ = std::fmax(0, startle_ - dt * 2);
+  chew_ = std::fmax(0, chew_ - dt);
+  if (hatchT_ >= 0) hatchT_ += dt;
+  if (growT_ >= 0 && (growT_ += dt) > 3) growT_ = -1;
+  const bool sleeping = asleep();
+  if (!sleeping) pet_.update(dt);
+  R_ = approach(R_, pet_.size() * (growT_ >= 0 ? 1.08f : 1.f), 3, dt);
+  if ((saveT_ -= dt) < 0) { saveT_ = 30; pet_.save(store_); }
 
-  // nach der Begrüßung und dann ab und zu: „Wie geht's dir?“
-  if (bubbleT_ <= 0 && checkin_ >= 0 && (idle_ > 3 && idle_ < 3.1f + dt)) { say("Wie geht's dir?", 8); bubbleAsk_ = true; }
-  if (bubbleT_ <= 0 && checkin_ >= 0 && idle_ > 45) { say("Wie geht's dir?", 8); bubbleAsk_ = true; idle_ = 3.2f; }
+  // Ab und zu: ein Wunsch oder „Wie geht's dir?“ (nie vorwurfsvoll)
+  if (pet_.stage != Pet::EGG && !sleeping && bubbleT_ <= 0 && (askT_ -= dt) < 0) {
+    int low = -1;
+    for (int i = 0; i < Pet::N_NEEDS; i++) if (pet_.need[i] < 0.35f && (low < 0 || pet_.need[i] < pet_.need[low])) low = i;
+    static const char* const WISH[3] = {"Ich hab ein bisschen Hunger.", "Kuschelst du mit mir?", "Spielen wir was?"};
+    if (low >= 0 && rnd() < 0.6f) say(WISH[low], 5);
+    else if (checkin_ >= 0) say("Wie geht's dir?", 8, true);
+    askT_ = 40;
+  }
+
+  // ---- Ei: warm streicheln oder antippen, dann schlüpft Grummel ----
+  if (pet_.stage == Pet::EGG) {
+    if (in.tap) { pet_.warmth += 0.08f; sqv_ += 2; }
+    if (in.finger) {
+      const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - BUDDY_Y;
+      onBuddy_ = dx * dx + dy * dy < (R_ * 1.6f) * (R_ * 1.6f);
+      if (onBuddy_ && hadFinger_) {
+        const float d = std::hypot(in.fingerX - lastFX_, in.fingerY - lastFY_);
+        pet_.warmth += d / 1500;
+        sqv_ += d * 0.02f;
+      }
+      lastFX_ = in.fingerX; lastFY_ = in.fingerY;
+    } else onBuddy_ = false;
+    hadFinger_ = in.finger;
+    if (in.shaking) pet_.warmth += dt * 0.15f;
+    if (pet_.warmth >= 1 && hatchT_ < 0) {
+      hatchT_ = 0;
+      for (int k = 0; k < 5; k++) { Synth::Voice v; v.wave = Synth::SINE; v.f0 = v.f1 = 523.f * std::pow(1.19f, float(k)); v.delay = 0.08f * k; v.dur = 0.3f; v.vol = 0.13f; synth_.play(v); }
+    }
+    if (hatchT_ > 0.6f) {   // geschlüpft
+      pet_.stage = Pet::BABY;
+      pet_.save(store_);
+      R_ = pet_.size();
+      hatchT_ = -1;
+      say("Hallo! Ich bin Grummel!", 3.5f);
+      askT_ = 8;
+      sqv_ = 4;
+    }
+    sqv_ += (-80.f * sq_ - 6.f * sqv_) * dt;
+    sq_ = clampf(sq_ + sqv_ * dt, -0.14f, 0.14f);
+    if (pet_.stage == Pet::EGG) {
+      // Apps sind auch vor dem Schlüpfen erreichbar
+      if (in.tap)
+        for (int i = 0; i < nApps_; i++) {
+          float x, y;
+          iconPos(i, nApps_, x, y);
+          if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { pet_.warmth -= 0.08f; requestGoto(apps_[i].tile); break; }
+        }
+      return;
+    }
+  }
 
   // ---- Antippen ----
   if (in.tap) {
-    idle_ = 3.2f;
+    askT_ = std::fmax(askT_, 10);
     const float bw = Scene::textW(fonts::body, bubble_) + 36;
-    if (bubbleT_ > 0 && bubbleAsk_ && in.tapY < BUBBLE_Y + BUBBLE_H + 8 && std::fabs(in.tapX - W / 2) < bw / 2 + 8) {
+    for (int i = 0; i < Pet::N_NEEDS; i++) {   // Bedürfnis-Symbole oben
+      float x, y;
+      needPos(i, x, y);
+      if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (NEED_R + 10) * (NEED_R + 10)) {
+        if (i == Pet::FOOD) feed();
+        else if (i == Pet::CUDDLE) say("Streichel mich!", 2);
+        else for (int k = 0; k < nApps_; k++) if (apps_[k].kind == 3) requestGoto(apps_[k].tile);
+        return;
+      }
+    }
+    if (bubbleT_ > 0 && bubbleAsk_ && in.tapY > BUBBLE_Y - 6 && in.tapY < BUBBLE_Y + BUBBLE_H + 8 && std::fabs(in.tapX - W / 2) < bw / 2 + 8) {
       requestGoto(checkin_);
       bubbleT_ = 0;
       return;
     }
     const float dx = in.tapX - BUDDY_X, dy = in.tapY - BUDDY_Y;
-    if (dx * dx + dy * dy < (BUDDY_R + 14) * (BUDDY_R + 14)) {
+    if (dx * dx + dy * dy < (R_ + 14) * (R_ + 14)) {
+      if (sleeping) { say("Psst … ich schlafe.", 2); return; }
       giggle_ = 1.1f;
       sqv_ += 3;
       say(rnd() < 0.5f ? "Hihi!" : "Das kitzelt!", 1.6f);
@@ -99,27 +180,45 @@ void Home::tick(const TileInput& in) {
     }
   }
 
+  // ---- Füttern: Apfel fliegt in den Mund, dann wird gekaut ----
+  if (foodT_ >= 0) {
+    foodT_ += dt / 0.7f;
+    if (foodT_ >= 1) {
+      foodT_ = -1;
+      chew_ = 1.2f;
+      pet_.need[Pet::FOOD] = std::fmin(1.f, pet_.need[Pet::FOOD] + 0.35f);
+      if (pet_.addGrowth(1)) { growT_ = 0; say("Ich bin gewachsen!", 3); }
+      else if (pet_.need[Pet::FOOD] > 0.9f) say("Mmh, jetzt bin ich satt!", 2.2f);
+      else say("Mmh, lecker!", 1.6f);
+      pet_.save(store_);
+      Synth::Voice v; v.wave = Synth::NOISE; v.filt = Synth::LP; v.cut0 = 500; v.cut1 = 250; v.dur = 0.09f; v.vol = 0.3f; synth_.play(v);
+    }
+  }
+
   // ---- Streicheln: Finger zieht über Grummel ----
   onBuddy_ = false;
   if (in.finger) {
     const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - BUDDY_Y;
-    onBuddy_ = dx * dx + dy * dy < (BUDDY_R * 1.5f) * (BUDDY_R * 1.5f);
+    onBuddy_ = dx * dx + dy * dy < (R_ * 1.5f) * (R_ * 1.5f);
     if (onBuddy_ && hadFinger_) {
-      const float mx = in.fingerX - lastFX_, my = in.fingerY - lastFY_, d = std::sqrt(mx * mx + my * my);
+      const float d = std::hypot(in.fingerX - lastFX_, in.fingerY - lastFY_);
       if (d > 1.2f) {
         strokeAcc_ += d;
+        cuddleAcc_ += d;
         purr_ = approach(purr_, 1, 3, dt);
         sqv_ += d * 0.02f;
+        pet_.need[Pet::CUDDLE] = std::fmin(1.f, pet_.need[Pet::CUDDLE] + d / 3000);
+        if (cuddleAcc_ > 900) { cuddleAcc_ = 0; if (pet_.addGrowth(1)) { growT_ = 0; say("Ich bin gewachsen!", 3); } }
         if (strokeAcc_ > 70 && nHearts_ < 12) {   // Herzchen steigen auf
           strokeAcc_ = 0;
-          hearts_[nHearts_++] = {BUDDY_X + (rnd() - 0.5f) * BUDDY_R * 1.4f, BUDDY_Y - BUDDY_R * 0.6f, 0};
+          hearts_[nHearts_++] = {BUDDY_X + (rnd() - 0.5f) * R_ * 1.4f, BUDDY_Y - R_ * 0.6f, 0};
           Synth::Voice v; v.wave = Synth::NOISE; v.filt = Synth::LP; v.cut0 = v.cut1 = 220; v.amF = 24; v.amD = 0.8f; v.attack = 0.05f; v.dur = 0.5f; v.vol = 0.2f; synth_.play(v);
           if (bubbleT_ <= 0 && rnd() < 0.35f) say(rnd() < 0.5f ? "Mmmh, schön!" : "Das mag ich!", 1.8f);
         }
       }
     }
     lastFX_ = in.fingerX; lastFY_ = in.fingerY;
-    idle_ = 3.2f;
+    askT_ = std::fmax(askT_, 10);
   }
   hadFinger_ = in.finger;
   if (!onBuddy_) purr_ = approach(purr_, 0, 1.2f, dt);
@@ -129,21 +228,21 @@ void Home::tick(const TileInput& in) {
     if (dizzy_ < 0.5f) { say("Huiii!", 1.5f); Synth::Voice v; v.wave = Synth::SINE; v.f0 = 900; v.f1 = 300; v.dur = 0.5f; v.vol = 0.15f; synth_.play(v); }
     dizzy_ = 1.6f;
     sqv_ += (rnd() - 0.5f) * 6 * in.shake;
-    idle_ = 3.2f;
   }
   if (in.nKnocks > 0 && dizzy_ <= 0) { startle_ = 1; sqv_ -= 2; if (bubbleT_ <= 0) say("Huch!", 1.2f); }
 
   // ---- Stimme: Grummel hört zu ----
-  if (in.voice > 0.15f) { voiceT_ += dt; listen_ = approach(listen_, 1, 6, dt); idle_ = 3.2f; }
+  if (in.voice > 0.15f) { voiceT_ += dt; listen_ = approach(listen_, 1, 6, dt); askT_ = std::fmax(askT_, 10); }
   else {
     if (voiceT_ > 0.8f && bubbleT_ <= 0) say(rnd() < 0.5f ? "Ich hör dir zu!" : "Erzähl mir mehr!", 2);
     voiceT_ = 0;
     listen_ = approach(listen_, 0, 2, dt);
   }
 
-  // Blick: zum Finger, sonst umherschauen; Blinzeln; Feder
+  // Blick, Blinzeln, Feder, Herzchen
   float tx = std::sin(clock_ * 0.37f) * 0.5f, ty = std::sin(clock_ * 0.23f) * 0.3f;
   if (in.finger) { tx = clampf((in.fingerX - BUDDY_X) / 120, -1, 1); ty = clampf((in.fingerY - BUDDY_Y) / 120, -1, 1); }
+  if (foodT_ >= 0) { tx = -0.6f; ty = -0.8f; }   // schaut dem Apfel entgegen
   lookX_ = approach(lookX_, tx, 6, dt);
   lookY_ = approach(lookY_, ty, 6, dt);
   blink_ -= dt;
@@ -159,32 +258,82 @@ void Home::tick(const TileInput& in) {
 
 // ---------------- Zeichnen ----------------
 
+void Home::drawEgg(Scene& s) {
+  const float w = pet_.warmth;
+  const float shake = (w > 0.5f ? std::sin(clock_ * 20) * 2 * (w - 0.5f) : 0) + sq_ * 30;
+  const float x = BUDDY_X + shake, y = BUDDY_Y + 6;
+  if (hatchT_ >= 0) {   // Schale springt auf, Licht
+    const float u = smooth(hatchT_ / 0.6f);
+    s.glow(x, y, 120 * u + 1, hex(0xfff0b0), 0.6f * (1 - u * 0.5f));
+    s.ellipse(x - 30 * u, y - 10 - 40 * u, 34, 26, hex(0xfff3d6), hex(0xf0c890), 1 - u);
+    s.ellipse(x + 30 * u, y + 20 * u, 34, 26, hex(0xfff3d6), hex(0xf0c890), 1 - u);
+    return;
+  }
+  s.glow(x, y, 80, hex(0xffd88a), 0.12f + 0.25f * w);
+  s.ellipse(x, y, 36, 46, hex(0xfff3d6), hex(0xf0c890));
+  s.circle(x - 14, y - 12, 6, hex(0x86e3c9), 0.7f);
+  s.circle(x + 12, y + 8, 8, hex(0x86e3c9), 0.7f);
+  s.circle(x - 6, y + 24, 5, hex(0x86e3c9), 0.7f);
+  s.ellipse(x - 12, y - 24, 8, 5, hex(0xffffff), 0.5f);
+  if (w > 0.35f) {   // Risse
+    s.capsule(x - 20, y - 6, x - 10, y + 2, 1.4f, hex(0x8a6a40));
+    s.capsule(x - 10, y + 2, x - 2, y - 8, 1.4f, hex(0x8a6a40));
+  }
+  if (w > 0.7f) {
+    s.capsule(x - 2, y - 8, x + 8, y + 1, 1.4f, hex(0x8a6a40));
+    s.capsule(x + 8, y + 1, x + 18, y - 7, 1.4f, hex(0x8a6a40));
+  }
+  const float a = 0.6f + 0.3f * std::sin(clock_ * 2.5f);
+  s.text(fonts::body, "Streichel das Ei!", W / 2, 64, TXT, a, Align::Center);
+}
+
 void Home::drawBuddy(Scene& s) {
-  const float breathe = 1 + 0.02f * std::sin(clock_ * 1.6f);
-  const float lean = listen_ * 6;
-  const float x = BUDDY_X + lean * 0.3f, y = BUDDY_Y - 4 * smooth(giggle_) - startle_ * 6;
-  const float rx = BUDDY_R * (1 + sq_) * breathe, ry = BUDDY_R * (1 - sq_) * breathe;
-  s.glow(x, y, BUDDY_R * 1.5f, hex(0x3fc0a0), 0.22f, BUDDY_R * 0.85f);
-  s.ellipse(x - rx * 0.38f, y + ry * 0.92f, BUDDY_R * 0.2f, BUDDY_R * 0.1f, scale(BODY_BOT, 0.8f));
-  s.ellipse(x + rx * 0.38f, y + ry * 0.92f, BUDDY_R * 0.2f, BUDDY_R * 0.1f, scale(BODY_BOT, 0.8f));
+  const float R = R_;
+  const bool baby = pet_.stage == Pet::BABY, sleeping = asleep();
+  const float breathe = 1 + (sleeping ? 0.04f : 0.02f) * std::sin(clock_ * (sleeping ? 0.9f : 1.6f));
+  const float x = BUDDY_X + listen_ * 2, y = BUDDY_Y + (52 - R) * 0.8f - 4 * smooth(giggle_) - startle_ * 6;
+  const float rx = R * (1 + sq_) * breathe, ry = R * (1 - sq_) * breathe;
+  if (growT_ >= 0)   // Wachsen: Funkeln
+    for (int k = 0; k < 8; k++) {
+      const float an = k * TAU / 8 + growT_ * 2, rr = R * 1.4f + 20 * growT_;
+      s.star(x + rr * std::sin(an), y - rr * std::cos(an), 7, GOLD, 1 - smooth((growT_ - 2) / 1), an);
+    }
+  s.glow(x, y, R * 1.5f, hex(0x3fc0a0), 0.22f, R * 0.85f);
+  s.ellipse(x - rx * 0.38f, y + ry * 0.92f, R * 0.2f, R * 0.1f, scale(BODY_BOT, 0.8f));
+  s.ellipse(x + rx * 0.38f, y + ry * 0.92f, R * 0.2f, R * 0.1f, scale(BODY_BOT, 0.8f));
   const float wa = 0.01f + 0.03f * (dizzy_ > 0 ? 1.f : 0.f) + 0.012f * purr_;
   const float wob[6] = {wa, clock_ * 2.1f, wa * 0.5f, -clock_ * 2.9f + 1, wa * 0.3f, clock_ * 3.7f + 2};
   s.blob(x, y, rx, ry, wob, BODY_TOP, BODY_BOT);
+  if (baby) s.arc(x + 4, y - ry - 6, 7, 3.5f, -2.2f, 1.6f, BODY_BOT);   // Haarlocke
   s.ellipse(x - rx * 0.36f, y - ry * 0.52f, rx * 0.24f, ry * 0.12f, hex(0xffffff), 0.18f);
   const float ch = 1 + 0.5f * purr_;
-  s.ellipse(x - rx * 0.56f, y + ry * 0.14f, BUDDY_R * 0.13f * ch, BUDDY_R * 0.08f * ch, CHEEK, 0.4f + 0.3f * purr_);
-  s.ellipse(x + rx * 0.56f, y + ry * 0.14f, BUDDY_R * 0.13f * ch, BUDDY_R * 0.08f * ch, CHEEK, 0.4f + 0.3f * purr_);
+  s.ellipse(x - rx * 0.56f, y + ry * 0.14f, R * 0.13f * ch, R * 0.08f * ch, CHEEK, 0.4f + 0.3f * purr_);
+  s.ellipse(x + rx * 0.56f, y + ry * 0.14f, R * 0.13f * ch, R * 0.08f * ch, CHEEK, 0.4f + 0.3f * purr_);
+  // Schmuck für gesammelte Sterne
+  const int acc = Pet::accessory(starsGet(store_));
+  const float hx = x + rx * 0.45f, hy = y - ry * 0.78f;
+  if (acc == 1) {   // Schleife
+    s.ellipse(hx - 9, hy, 9, 6, hex(0xff6fa8)); s.ellipse(hx + 9, hy, 9, 6, hex(0xff6fa8)); s.circle(hx, hy, 4.5f, hex(0xffa6c9));
+  } else if (acc == 2) {   // Blume
+    for (int k = 0; k < 5; k++) s.circle(hx + 8 * std::sin(k * TAU / 5), hy - 8 * std::cos(k * TAU / 5), 5.5f, hex(0xffe08a));
+    s.circle(hx, hy, 4.5f, hex(0xff9a5a));
+  } else if (acc == 3) {   // Krone
+    const float cx = x, cy = y - ry - 4;
+    s.rrect(cx - 18, cy - 4, 36, 10, 3, GOLD);
+    for (int k = -1; k <= 1; k++) s.star(cx + k * 12, cy - 8, 6, GOLD);
+    s.circle(cx, cy + 1, 2.5f, hex(0xff6b5a));
+  }
   // Augen
-  const float e = BUDDY_R * 0.19f;
+  const float e = R * (baby ? 0.23f : 0.19f);
   for (int sd = -1; sd <= 1; sd += 2) {
     const float ex = x + sd * rx * 0.33f, ey = y - ry * 0.12f;
     if (dizzy_ > 0) {   // Kringelaugen
       const float rot = clock_ * 8 * sd;
       s.arc(ex, ey, e * 0.8f, 3, rot, rot + 4.5f, INK);
       s.arc(ex, ey, e * 0.38f, 3, rot + 2, rot + 6, INK);
-    } else if (giggle_ > 0) {
+    } else if (giggle_ > 0 || chew_ > 0) {
       s.arc(ex, ey + e * 0.35f, e * 0.75f, 4.5f, -1.15f, 1.15f, INK);
-    } else if (purr_ > 0.4f) {
+    } else if (purr_ > 0.4f || sleeping) {
       s.arc(ex, ey - e * 0.25f, e * 0.75f, 4, PIF - 1.15f, PIF + 1.15f, INK);
     } else if (blink_ < 0) {
       s.capsule(ex - e * 0.75f, ey, ex + e * 0.75f, ey, 2.2f, INK);
@@ -198,21 +347,50 @@ void Home::drawBuddy(Scene& s) {
   }
   // Mund
   const float my = y + ry * 0.32f;
-  if (giggle_ > 0) {
-    s.ellipse(x, my, BUDDY_R * 0.16f, BUDDY_R * 0.13f, INK);
-    s.ellipse(x, my + BUDDY_R * 0.05f, BUDDY_R * 0.09f, BUDDY_R * 0.05f, hex(0xe0607e));
+  if (chew_ > 0) {
+    const float o = std::fabs(std::sin(chew_ * 12));
+    s.ellipse(x, my, R * 0.12f, R * (0.03f + 0.09f * o), INK);
+  } else if (giggle_ > 0) {
+    s.ellipse(x, my, R * 0.16f, R * 0.13f, INK);
+    s.ellipse(x, my + R * 0.05f, R * 0.09f, R * 0.05f, hex(0xe0607e));
   } else if (dizzy_ > 0) {
-    for (int k = 0; k < 4; k++) s.capsule(x - BUDDY_R * 0.2f + k * BUDDY_R * 0.1f, my + (k & 1 ? 3 : -3), x - BUDDY_R * 0.1f + k * BUDDY_R * 0.1f, my + (k & 1 ? -3 : 3), 1.8f, INK);
+    for (int k = 0; k < 4; k++) s.capsule(x - R * 0.2f + k * R * 0.1f, my + (k & 1 ? 3 : -3), x - R * 0.1f + k * R * 0.1f, my + (k & 1 ? -3 : 3), 1.8f, INK);
   } else if (listen_ > 0.4f) {
-    s.ellipse(x, my, BUDDY_R * 0.06f, BUDDY_R * 0.08f, INK);
+    s.ellipse(x, my, R * 0.06f, R * 0.08f, INK);
     for (int k = 1; k <= 2; k++)   // Schallwellen am Ohr
       s.arc(x + rx + 4, y - ry * 0.1f, 8.f * k, 2.5f, 0.6f, 2.5f, hex(0x8fe3d0), (0.7f - 0.2f * k) * listen_);
   } else {
-    s.arc(x, my - BUDDY_R * 0.1f, BUDDY_R * 0.13f, 3.5f, PIF - 0.95f, PIF + 0.95f, INK);
+    s.arc(x, my - R * 0.1f, R * 0.13f, 3.5f, PIF - 0.95f, PIF + 0.95f, INK);
+  }
+  if (sleeping) {   // z z z
+    for (int k = 0; k < 2; k++) {
+      const float u = std::fmod(clock_ * 0.35f + k * 0.5f, 1.f);
+      s.text(fonts::body, "z", x + rx * 0.8f + u * 14, y - ry - u * 26, hex(0xd8d0ff), (1 - u) * 0.8f, Align::Center);
+    }
   }
   for (int i = 0; i < nHearts_; i++) {
     const Heart& h = hearts_[i];
     heart(s, h.x + 6 * std::sin(h.t * 5 + i), h.y - 50 * h.t, 9, hex(0xff8fb8), 1 - smooth((h.t - 0.8f) / 0.6f));
+  }
+  if (foodT_ >= 0) {   // Apfel fliegt im Bogen zum Mund
+    float sx, sy;
+    needPos(Pet::FOOD, sx, sy);
+    const float u = smooth(foodT_), tx = x, ty = my;
+    apple(s, sx + (tx - sx) * u, sy + (ty - sy) * u - 50 * std::sin(u * PIF), 12 - 4 * u, 1);
+  }
+}
+
+void Home::drawNeeds(Scene& s) {
+  for (int i = 0; i < Pet::N_NEEDS; i++) {
+    float x, y;
+    needPos(i, x, y);
+    const float v = pet_.need[i];
+    s.circle(x, y, NEED_R + 1, ICON_BG);
+    s.ring(x, y, NEED_R + 4, 3, hex(0x2a3050));
+    s.arc(x, y, NEED_R + 4, 3, 0, std::fmax(0.15f, v * TAU), NEED_COL[i], 0.9f);
+    if (i == Pet::FOOD) apple(s, x, y + 1, 11, 1);
+    else if (i == Pet::CUDDLE) heart(s, x, y - 1, 8.5f, NEED_COL[i], 1);
+    else ball(s, x, y, 9, 1);
   }
 }
 
@@ -241,6 +419,11 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       s.ring(x + 7, y + 6, 12, 2, hex(0x3a4a70));
       s.ellipse(x - 9, y - 7, 9, 9, hex(0xffdf80), hex(0xe8a020));
       break;
+    case 5:   // Rätsel: Fragezeichen in einer Sprechblase
+      s.circle(x, y - 2, 19, hex(0xb7a6ff));
+      s.capsule(x - 10, y + 12, x - 15, y + 20, 3, hex(0xb7a6ff));
+      s.text(fonts::title, "?", x, y - 2 - fonts::title.lineH / 2.f + 2, hex(0x241c48), 1, Align::Center);
+      break;
     default: {   // Pferd
       static const Horse H = {"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false};
       drawHorse(s, H, x - 2, y + 20, 0.36f, clock_ * 0.3f);
@@ -256,18 +439,21 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
 }
 
 void Home::draw(Scene& s) {
+  if (pet_.stage == Pet::EGG) drawEgg(s);
+  else {
+    drawNeeds(s);
+    drawBuddy(s);
+  }
+  drawStarCount(s, 300, 18, starsGet(store_), 0.85f);
   // Sprechblase
   if (bubbleT_ > 0 && bubble_[0]) {
     const float a = std::fmin(1.f, bubbleT_ / 0.3f) * std::fmin(1.f, (bubbleDur_ - bubbleT_) / 0.25f);
-    const float w = Scene::textW(fonts::body, bubble_) + 36;
+    const float w = std::fmin(330.f, Scene::textW(fonts::body, bubble_) + 36.f);
     const Col bg = bubbleAsk_ ? hex(0xffe9a8) : hex(0xf2eefa);
     s.rrect(W / 2 - w / 2, BUBBLE_Y, w, BUBBLE_H, BUBBLE_H / 2, bg, a);
-    s.circle(W / 2 + 12, BUBBLE_Y + BUBBLE_H + 6, 6, bg, a);
-    s.circle(W / 2 + 6, BUBBLE_Y + BUBBLE_H + 16, 3.5f, bg, a);
+    s.circle(W / 2 + 14, BUBBLE_Y + BUBBLE_H + 5, 5, bg, a);
     s.text(fonts::body, bubble_, W / 2, BUBBLE_Y + (BUBBLE_H - fonts::body.lineH) / 2 + 1, hex(0x2a1a30), a, Align::Center);
   }
-  drawBuddy(s);
-  drawStarCount(s, W / 2, 196, starsGet(store_), 0.8f);
   for (int i = 0; i < nApps_; i++) {
     float x, y;
     iconPos(i, nApps_, x, y);

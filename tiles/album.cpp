@@ -207,7 +207,9 @@ void Album::drawBack(Scene& s, int i, float a) {
   const HorseCard& c = cards_[i];
   s.rrect(18, 18, W - 36, H - 36, 44, CARD_RIM, a);
   s.rrect(20, 20, W - 40, H - 40, 42, CARD_BG, a);
-  s.text(fonts::title, c.name, W / 2, 34, TXT, a, Align::Center);
+  // langer Name: kleinere Schrift, damit er nicht unter das ✕ rutscht
+  if (Scene::textW(fonts::title, c.name) <= 226) s.text(fonts::title, c.name, W / 2, 34, TXT, a, Align::Center);
+  else s.text(fonts::body, c.name, W / 2, 40, TXT, a, Align::Center);
   s.text(fonts::body, "Farben", W / 2, 84, GOLD, a, Align::Center);
   wrapped(s, c.farben, fonts::small, 112, 22, 2, TXT, a, 300);
   s.text(fonts::body, "Wesen", W / 2, 164, GOLD, a, Align::Center);

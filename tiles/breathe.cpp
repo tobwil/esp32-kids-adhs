@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "fonts.h"
+#include "pet.h"
 #include "rewards.h"
 
 namespace dk {
@@ -32,7 +33,7 @@ void Breathe::tick(const TileInput& in) {
       if (t_ < intro_) break;
       const float L = in_ + out_, k = t_ - intro_;
       round_ = int(k / L);
-      if (round_ >= rounds_) { phase_ = DONE; t_ = 0; stars_ = starsAdd(store_); break; }
+      if (round_ >= rounds_) { phase_ = DONE; t_ = 0; stars_ = starsAdd(store_); petEvent(store_, "pe_calm"); break; }
       // sanfter Ton zu Beginn jeder Hälfte (nur wenn der Ton an ist)
       const int half = int(k / L) * 2 + (std::fmod(k, L) >= in_ ? 1 : 0);
       if (half != lastHalf_) {

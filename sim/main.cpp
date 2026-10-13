@@ -25,7 +25,10 @@
 #include "home.h"
 #include "album.h"
 #include "album_builtin.h"
+#include "quiz.h"
+#include "quiz_kids.h"
 #include "rewards.h"
+#include "riddle.h"
 
 using namespace dk;
 
@@ -154,10 +157,10 @@ struct FileImages : ImageStore {
   Image thumb(int id) override { return get(thumbs, id, "_t.rgb", THUMB_W, THUMB_H); }
 };
 
-// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album
-enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM };
-static const Home::AppIcon APPS[] = {
-    {"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3}, {"Pferde", T_ALBUM, 4}};
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE };
+static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2},
+                                     {"Kugel", T_BALANCE, 3},   {"Pferde", T_ALBUM, 4},     {"Rätsel", T_RIDDLE, 5}};
 
 struct Kids {
   Home home;
@@ -166,18 +169,24 @@ struct Kids {
   Breathe breathe;
   Balance balance;
   Album album;
+  Riddle riddle;
+  QuizPack pack;
   FileImages images;
   Kids(Synth& synth, Store& store, uint32_t seed)
-      : home(synth, store), checkin(synth, store), grummel(synth, store, seed, KID_SKIN), breathe(synth, store), balance(synth, store), album(synth, store, seed * 7 + 3) {
+      : home(synth, store), checkin(synth, store), grummel(synth, store, seed, KID_SKIN), breathe(synth, store), balance(synth, store), album(synth, store, seed * 7 + 3),
+        riddle(synth, store, seed * 13 + 5) {
     album.setImages(&images);
     album.load(ALBUM_BUILTIN);
-    home.setApps(APPS, 5);
+    pack.load(QUIZ_KIDS);
+    riddle.setPack(&pack);
+    riddle.setAlbum(&album, &images);
+    home.setApps(APPS, 6);
     home.setCheckIn(T_CHECKIN);
     checkin.setTargets(T_GRUMMEL, T_BREATHE);
   }
   bool startOff = true;
   void addTo(App& app) {
-    app.add(&home); app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album);
+    app.add(&home); app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album); app.add(&riddle);
     app.setHome(T_HOME);
     app.setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
     app.setPower(60000, 180000, startOff, false);   // aus bis zum Tippen, nach 3 min wieder schwarz
@@ -229,12 +238,25 @@ static int screens(const char* dir) {
     for (auto& i : gIssues) { printf("  %s: %s\n", name, i.c_str()); nIssues++; }
   };
   auto tapFace = [&](int i) { float x, y; CheckIn::faceCenter(i, x, y); sc.tap(int(x), int(y)); };
-  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, 5, x, y); sc.tap(int(x), int(y)); };
+  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, 6, x, y); sc.tap(int(x), int(y)); };
   auto close = [&]() { sc.tap(int(App::CLOSE_X), int(App::CLOSE_Y)); sc.run(0.5f); };
   int guard = 0;
 
-  sc.run(1.0f); shot("00_dashboard_hallo");
-  sc.run(3.0f); shot("01_dashboard_frage");
+  // Ei: streicheln, bis Grummel schlüpft
+  sc.run(1.0f); shot("00_ei");
+  sc.touch(true, 150, 166); sc.frame();
+  for (int k = 0; k < 400 && kids.home.pet().stage == Pet::EGG; k++) {
+    sc.touch(true, 150 + int(70 * std::fabs(std::sin(k * 0.2f))), 166); sc.frame();
+    if (k == 60) shot("00a_ei_risse");
+  }
+  sc.touch(false, 184, 166); sc.frame();
+  sc.run(0.4f); shot("00b_geschluepft");
+  sc.run(3.5f); shot("01_dashboard_frage");
+  // füttern: Apfel antippen
+  { float x, y; Home::needPos(0, x, y); sc.tap(int(x), int(y)); }
+  sc.run(0.35f); shot("01a_apfel_fliegt");
+  sc.run(0.6f); shot("01b_kauen");
+  sc.run(2.0f);
   // streicheln: Finger hin und her über Grummel
   sc.touch(true, 140, 150); sc.frame();
   for (int k = 0; k < 40; k++) { sc.touch(true, 140 + int(80 * std::fabs(std::sin(k * 0.25f))), 150 + (k % 7)); sc.frame(); }
@@ -277,13 +299,38 @@ static int screens(const char* dir) {
   // alle Karten einmal ansehen (Textprüfung auf Vorder- und Rückseite)
   for (int i = 0; i < kids.album.count(); i++) { while (starsGet(store) < 3 * (i + 1)) starsAdd(store); }
   app.show(T_ALBUM);
-  for (int k = 0; k < 60 && kids.album.phase() != Album::GRID; k++) {
+  for (int k = 0; k < 90 && kids.album.phase() != Album::GRID; k++) {
     sc.tap(184, 214); sc.run(0.7f);
     char n[32]; snprintf(n, sizeof n, "z%02d_karte", k); if (k % 2 == 0) shot(n);
   }
   close();
+  // Rätsel: drei Runden, abwechselnd richtig und falsch antworten (Textprüfung für viele Fragen)
+  for (int round = 0, q = 0; round < 3; round++) {
+    tapIcon(5); sc.run(0.8f);
+    for (int k = 0; k < 8 && kids.riddle.phase() != Riddle::DONE; k++, q++) {
+      char n[40];
+      snprintf(n, sizeof n, "r%d%d_frage", round, k); if (round == 0 || kids.riddle.kind() != Riddle::TEXT) shot(n);
+      if (kids.riddle.kind() == Riddle::COUNT) {   // Zählhilfe: zwei Dinge antippen
+        float x, y; kids.riddle.countPos(0, x, y); sc.tap(x, y); sc.run(0.3f);
+        kids.riddle.countPos(1, x, y); sc.tap(x, y); sc.run(0.4f);
+        snprintf(n, sizeof n, "r%d%d_gezaehlt", round, k); shot(n);
+      }
+      const int pick = q % 3 == 1 ? (kids.riddle.correct() + 1) % 3 : kids.riddle.correct();
+      float x, y, w, h; kids.riddle.answerRect(pick, x, y, w, h);
+      sc.tap(x + w / 2, y + h / 2); sc.run(q % 3 == 1 ? 3.5f : 0.5f);
+      snprintf(n, sizeof n, "r%d%d_antwort", round, k); if (round == 0 || kids.riddle.kind() != Riddle::TEXT) shot(n);
+      if (kids.riddle.phase() == Riddle::WRONG) { sc.tap(184, 300); sc.run(0.5f); }
+      else sc.run(1.4f);
+    }
+    sc.run(0.8f); if (round == 0) shot("r0_geschafft");
+    sc.run(6.0f);
+  }
   // Einstellungen: 3 s auf eine freie Stelle drücken
   sc.touch(true, 30, 230); sc.run(3.4f); sc.touch(false, 30, 230); sc.frame(); sc.run(0.5f); shot("25_einstellungen");
+  // gewachsen mit Krone (viel Pflege, 50 Sterne)
+  store.set("pet_st", Pet::BIG); store.set("pet_gp", 60);
+  while (starsGet(store) < 50) starsAdd(store);
+  { Kids k2(synth, store, 9); App a2(synth, store); k2.startOff = false; k2.addTo(a2); Script s2{a2, {}, {}, 1000, {}, dir}; a2.begin(s2.ms); s2.run(2.5f); gIssues.clear(); s2.shot("26_gross_krone"); }
   printf("%d Textverstöße\n", nIssues);
   printf("Bilder in %s\n", dir);
   return 0;

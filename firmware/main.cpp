@@ -5,6 +5,7 @@
 //
 // Serielle Befehle (115200 Baud, eine Zeile):
 //   status         Fragenpaket, Dateisystem, Uhrzeit, Kachel
+//   neustart-kind  Spielstände (Sterne, Karten, Check-ins, Grummel) auf Anfang, Einstellungen bleiben
 //   log            Zwei-Sekunden-Protokoll (fps, Zeiten, Ruckler) ein/aus, startet aus
 //   imu            Messwerte je Frame ein/aus (Spitze, Grundunruhe, erkannte Schläge) zum Kalibrieren
 //   {"time":N}     Uhrzeit setzen (Unix-Sekunden, Ortszeit), später vom Companion
@@ -14,7 +15,7 @@
 //   {"file":"begin","path":"/pferde/3.jpg","size":N}, dann „F <base64>“ (je ≤ 512 Byte), dann {"file":"end"}
 //                  Datei ins LittleFS schreiben (tools/horses.py upload); {"album":"reload"} lädt Karten und Fotos neu
 //   klopf N        N künstliche Schläge im Abstand von 250 ms (Test ohne Tisch)
-//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album)
+//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   bench          Rasterzeit je Form messen
 //   prof           Rechenzeit je Formtyp im Zwei-Sekunden-Protokoll ein/aus
@@ -35,8 +36,8 @@
 #include "checkin.h"
 #include "home.h"
 #include "grummel.h"
-#include "oracle.h"
-#include "quiz_builtin.h"
+#include "quiz_kids.h"
+#include "riddle.h"
 #include "fonts.h"
 
 using namespace dk;
@@ -64,14 +65,13 @@ static Synth synth;
 static NvsStore store;
 static App* app;
 static Scene scene;
-// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album.
-enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM };
-static const Home::AppIcon APPS[] = {
-    {"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3}, {"Pferde", T_ALBUM, 4}};
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel.
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE };
+static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2},
+                                     {"Kugel", T_BALANCE, 3},   {"Pferde", T_ALBUM, 4},     {"Rätsel", T_RIDDLE, 5}};
 static Home* home;
-// Das Orakel kommt mit den Kinderfragen zurück.
 static bool fsOk = false;
-static Oracle* oracle = nullptr;
+static Riddle* riddle = nullptr;
 static CheckIn* checkin;
 static Grummel* grummel;
 static Breathe* breathe;
@@ -181,13 +181,13 @@ static void loadPack() {
   if (!text || !fresh.load(text)) {
     if (text) heap_caps_free(text);
     text = nullptr;
-    pack.load(QUIZ_BUILTIN);
+    pack.load(QUIZ_KIDS);
   } else {
     pack.load(text);
   }
   if (packText) heap_caps_free(packText);
   packText = text;
-  if (oracle) oracle->setPack(&pack);
+  if (riddle) riddle->setPack(&pack);
   Serial.printf("fragen: %d (%s, %s)\n", pack.count(), pack.id(), text ? "übertragen" : "eingebaut");
 }
 
@@ -433,6 +433,15 @@ static void pollSerial() {
       uint8_t g[6] = {};
       hw::i2cRead(0x6B, 0x3B, g, 6);
       Serial.printf("imuraw gyro %d %d %d\n", int16_t(g[0] | g[1] << 8), int16_t(g[2] | g[3] << 8), int16_t(g[4] | g[5] << 8));
+    } else if (!strcmp(line, "neustart-kind")) {   // Spielstände auf Anfang (Einstellungen bleiben), dann Neustart
+      static const char* const KEYS[] = {"sterne", "alb_open", "alb_seed", "ci_n", "pet_st", "pet_gp", "pe_play", "pe_calm",
+                                         "gr_all", "gr_wk", "gr_wkn", "bal_lvl", "or_ser", "or_best", "or_all", "or_allr", "or_wn", "or_wr"};
+      for (const char* k : KEYS) store.prefs.remove(k);
+      for (int i = 0; i < 30; i++) { char k[8]; snprintf(k, sizeof k, "ci%d", i); store.prefs.remove(k); }
+      for (const char* k : {"pet_n0", "pet_n1", "pet_n2"}) store.prefs.remove(k);
+      Serial.println("spielstände zurückgesetzt, starte neu");
+      delay(100);
+      ESP.restart();
     } else if (!strcmp(line, "log")) { logOn = !logOn; Serial.printf("protokoll %s\n", logOn ? "an" : "aus"); }
     else if (!strcmp(line, "imu")) { imuStream = !imuStream; Serial.printf("imu-stream %s\n", imuStream ? "an" : "aus"); }
     else if (!strncmp(line, "kachel", 6)) app->show(atoi(line + 6));
@@ -473,7 +482,9 @@ void setup() {
   balance = new Balance(synth, store);
   album = new Album(synth, store, esp_random());
   album->setImages(&images);
-  home->setApps(APPS, 5);
+  riddle = new Riddle(synth, store, esp_random());
+  riddle->setAlbum(album, &images);
+  home->setApps(APPS, 6);
   home->setCheckIn(T_CHECKIN);
   checkin->setTargets(T_GRUMMEL, T_BREATHE);
   loadPack();
@@ -484,6 +495,7 @@ void setup() {
   app->add(breathe);
   app->add(balance);
   app->add(album);
+  app->add(riddle);
   app->setHome(T_HOME);
   app->setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
   app->setPower(60000, 180000, true, false);   // aus bis zum Tippen, nach 1 min dunkler, nach 3 min schwarz; Klopfen weckt nicht

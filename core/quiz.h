@@ -15,6 +15,7 @@ struct Question {
   const char* a[3];
   int correct;
   const char* expl;
+  const char* pic;     // optionales Bild, z. B. „zaehl:7:apfel“ (sonst "")
 };
 
 class QuizPack {

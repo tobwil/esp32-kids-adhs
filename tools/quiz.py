@@ -2,16 +2,19 @@
 """Fragenpakete fürs Orakel.
 
   quiz.py check   <paket.json>            Aufbau, Längen und Zeichen prüfen
-  quiz.py build   <paket.json>            als eingebautes Paket nach core/quiz_builtin.h schreiben
+  quiz.py build   <paket.json> [header] [name]
+                                          als eingebautes Paket schreiben (Standard core/quiz_builtin.h, QUIZ_BUILTIN)
   quiz.py upload  <paket.json> [port]     per USB aufs Gerät übertragen (ersetzt das eingebaute Paket)
   quiz.py reset   [port]                  übertragenes Paket löschen, Gerät nutzt wieder das eingebaute
   quiz.py generate <ausgabe.json> [--anzahl 50] [--kategorie Tiere] [--schwierigkeit mittel]
                                           neues Paket erzeugen und mit Websuche prüfen (siehe quiz_generate.py)
 
 Zeilenformat auf dem Gerät (eine Frage pro Zeile, | als Trenner):
-  kategorie|schwierigkeit(0 leicht, 1 mittel, 2 fies)|frage|antwort0|antwort1|antwort2|richtig(0-2)|erklärung
+  kategorie|schwierigkeit(0 leicht, 1 mittel, 2 fies)|frage|antwort0|antwort1|antwort2|richtig(0-2)|erklärung[|bild]
+Bild (optional): zaehl:<1-12>:<apfel|stern|herz|ball> zeigt so viele Dinge zum Zählen.
 """
 import glob
+import re
 import json
 import os
 import sys
@@ -56,6 +59,12 @@ def problems(fragen):
                 out.append(f"{where}: Zeichen fehlen in der Schrift: {''.join(bad)}")
             if "|" in t or "\n" in t:
                 out.append(f"{where}: | und Zeilenumbruch sind nicht erlaubt")
+        if "bild" in q:
+            m = re.fullmatch(r"zaehl:(\d+):(apfel|stern|herz|ball)", q["bild"])
+            if not m or not 1 <= int(m.group(1)) <= 12:
+                out.append(f"{where}: Bild muss zaehl:<1-12>:<apfel|stern|herz|ball> sein")
+            elif str(int(m.group(1))) != q["antworten"][q["richtig"]]:
+                out.append(f"{where}: Bild zeigt {m.group(1)} Dinge, richtige Antwort ist {q['antworten'][q['richtig']]}")
         key = q["frage"].strip().lower()
         if key in seen:
             out.append(f"{where}: Frage doppelt")
@@ -65,7 +74,10 @@ def problems(fragen):
 
 def lines(fragen):
     for q in fragen:
-        yield "|".join([q["kategorie"], str(DIFF[q["schwierigkeit"]]), q["frage"], *q["antworten"], str(q["richtig"]), q["erklaerung"]])
+        f = [q["kategorie"], str(DIFF[q["schwierigkeit"]]), q["frage"], *q["antworten"], str(q["richtig"]), q["erklaerung"]]
+        if q.get("bild"):
+            f.append(q["bild"])
+        yield "|".join(f)
 
 
 def check_or_exit(path):
@@ -86,15 +98,15 @@ def cmd_check(path):
     print(f"✓ {pack}: {len(fragen)} Fragen, " + ", ".join(f"{k} {v}" for k, v in cats.items()))
 
 
-def cmd_build(path):
+def cmd_build(path, header="core/quiz_builtin.h", name="QUIZ_BUILTIN"):
     pack, fragen = check_or_exit(path)
     def esc(s):
         return s.replace("\\", "\\\\").replace('"', '\\"')
     body = [f'    "#pack {esc(pack)}\\n"'] + [f'    "{esc(l)}\\n"' for l in lines(fragen)]
-    out = os.path.join(ROOT, "core", "quiz_builtin.h")
+    out = os.path.join(ROOT, header)
     with open(out, "w", encoding="utf-8") as f:
         f.write(f"// Erzeugt von tools/quiz.py build {os.path.relpath(path, ROOT)}, nicht von Hand ändern.\n")
-        f.write("#pragma once\n\nnamespace dk {\n\nstatic const char QUIZ_BUILTIN[] =\n")
+        f.write(f"#pragma once\n\nnamespace dk {{\n\nstatic const char {name}[] =\n")
         f.write("\n".join(body) + ";\n\n}  // namespace dk\n")
     print(f"✓ {out}: {len(fragen)} Fragen")
 
@@ -143,7 +155,7 @@ if __name__ == "__main__":
     if a[0] == "check" and len(a) > 1:
         cmd_check(a[1])
     elif a[0] == "build" and len(a) > 1:
-        cmd_build(a[1])
+        cmd_build(a[1], *a[2:4])
     elif a[0] == "upload" and len(a) > 1:
         cmd_upload(a[1], a[2] if len(a) > 2 else None)
     elif a[0] == "reset":

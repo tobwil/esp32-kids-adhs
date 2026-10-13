@@ -50,11 +50,11 @@ bool QuizPack::get(int i, Question& out) {
   while (p[n] && p[n] != '\n' && n < sizeof scratch_ - 1) n++;
   std::memcpy(scratch_, p, n);
   scratch_[n] = 0;
-  const char* f[8];
+  const char* f[9];
   int nf = 0;
   char* s = scratch_;
   f[nf++] = s;
-  for (; *s && nf < 8; s++)
+  for (; *s && nf < 9; s++)
     if (*s == '|') { *s = 0; f[nf++] = s + 1; }
   if (nf < 8) return false;
   out.cat = f[0];
@@ -63,6 +63,7 @@ bool QuizPack::get(int i, Question& out) {
   out.a[0] = f[3]; out.a[1] = f[4]; out.a[2] = f[5];
   out.correct = f[6][0] - '0';
   out.expl = f[7];
+  out.pic = nf > 8 ? f[8] : "";
   return out.correct >= 0 && out.correct <= 2;
 }
 

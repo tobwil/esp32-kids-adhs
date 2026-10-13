@@ -7,6 +7,7 @@
 
 #include "fonts.h"
 #include "quiz.h"
+#include "pet.h"
 #include "rewards.h"
 
 namespace dk {
@@ -190,7 +191,7 @@ void Grummel::setPhase(Phase p) {
     for (int i = 0; i < nDark_; i++) dark_[i].homing = true;   // die schwebenden Partikel werden eingesaugt
   }
   if (p == FULL) countSession(epoch_);
-  if (p == THANKS && skin_.kid) stars_ = starsAdd(store_);
+  if (p == THANKS && skin_.kid) { stars_ = starsAdd(store_); petEvent(store_, "pe_calm"); }
   if (p == BREATHE) { breathN_ = 0; breath_ = 0; }
 }
 

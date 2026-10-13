@@ -7,6 +7,8 @@
   horses.py build     Kartentexte als eingebautes Paket → tiles/album_builtin.h (+ out/karten.txt),
                       Bildnachweis → tools/horses/BILDNACHWEIS.md, Rohbilder für den Simulator aus den JPEGs
   horses.py upload    Fotos und Texte per USB aufs Gerät (LittleFS /pferde/…)
+  horses.py import <ordner>   eigene oder generierte Bilder übernehmen (<Nr>.png, <Nr>-name.jpg …),
+                      ohne Abschneiden: der Rand wird mit einer unscharfen Fassung desselben Bildes gefüllt
 
 Ein unpassendes Foto ersetzen: in pferde.json beim Pferd "commons": "Datei:Name.jpg" eintragen, dann fetch erneut.
 Benötigt: pillow, pyserial, certifi (tools/.venv).
@@ -152,6 +154,51 @@ def crop_card(im):
     return im.crop((x, y, x + tw, y + th))
 
 
+def fit_card(im):
+    """ganzes Bild auf 328×196, Rand mit unscharfer, abgedunkelter Fassung desselben Bildes füllen"""
+    from PIL import Image, ImageFilter, ImageEnhance
+    im = im.convert("RGB")
+    bg = im.resize((CARD_W, CARD_H), Image.LANCZOS) if abs(im.width / im.height - CARD_W / CARD_H) < 0.02 else None
+    if bg is not None:
+        return bg
+    cover = crop_card(im).filter(ImageFilter.GaussianBlur(14))
+    cover = ImageEnhance.Brightness(cover).enhance(0.55)
+    scale = min(CARD_W / im.width, CARD_H / im.height)
+    fg = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.LANCZOS)
+    cover.paste(fg, ((CARD_W - fg.width) // 2, (CARD_H - fg.height) // 2))
+    return cover
+
+
+def save_card(pid, card):
+    from PIL import Image
+    os.makedirs(OUT, exist_ok=True)
+    card.save(os.path.join(OUT, f"{pid}.jpg"), "JPEG", quality=84, progressive=False, optimize=True)   # Baseline für JPEGDEC
+    with open(os.path.join(OUT, f"{pid}.rgb"), "wb") as f:
+        f.write(to_rgb565(card))
+    with open(os.path.join(OUT, f"{pid}_t.rgb"), "wb") as f:
+        f.write(to_rgb565(card.resize((THUMB_W, THUMB_H), Image.LANCZOS)))
+
+
+def cmd_import(folder):
+    """eigene Bilder: Dateiname beginnt mit der Kartennummer (6.png, 06-haflinger.jpg)"""
+    from PIL import Image
+    ids = {p["id"]: p["name"] for p in load()}
+    cr = credits()
+    n = 0
+    for path in sorted(glob.glob(os.path.join(os.path.expanduser(folder), "*"))):
+        m = re.match(r"0*(\d+)", os.path.basename(path))
+        if not m or int(m.group(1)) not in ids or not path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+            continue
+        pid = int(m.group(1))
+        save_card(str(pid), fit_card(Image.open(path)))
+        cr[str(pid)] = {"datei": os.path.basename(path), "url": "", "seite": "", "lizenz": "eigenes Bild", "lizenz_url": "", "urheber": "eigenes Bild"}
+        print(f"✓ {pid}. {ids[pid]} ← {os.path.basename(path)}")
+        n += 1
+    with open(CREDITS, "w", encoding="utf-8") as f:
+        json.dump(cr, f, ensure_ascii=False, indent=2)
+    print(f"{n} Bilder übernommen. Weiter mit: horses.py review, dann horses.py upload")
+
+
 def cmd_fetch():
     from PIL import Image
     os.makedirs(OUT, exist_ok=True)
@@ -204,6 +251,8 @@ def clean_author(who):
 
 def foto_line(c):
     if not c:
+        return ""
+    if c.get("lizenz") == "eigenes Bild":
         return ""
     who = clean_author(c["urheber"])
     if len(who) > 38:
@@ -320,6 +369,8 @@ if __name__ == "__main__":
     cmds = {"fetch": cmd_fetch, "review": cmd_review, "build": cmd_build}
     if a and a[0] in cmds:
         cmds[a[0]]()
+    elif a and a[0] == "import" and len(a) > 1:
+        cmd_import(a[1])
     elif a and a[0] == "upload":
         cmd_upload(a[1] if len(a) > 1 else None)
     else:

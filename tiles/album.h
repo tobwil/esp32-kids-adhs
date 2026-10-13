@@ -32,6 +32,8 @@ class Album : public Tile {
   int count() const { return int(cards_.size()); }
   int owned() const { return opened_; }
   int pending() const;
+  int ownedCard(int k) const { return order_[k]; }   // k-te gesammelte Karte (k < owned()) → Kartenindex
+  const HorseCard& cardInfo(int i) const { return cards_[i]; }
   // für den Simulator
   enum Phase { GRID, FRONT, BACK, WRAPPED, REVEAL };
   Phase phase() const { return phase_; }

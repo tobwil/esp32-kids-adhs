@@ -1,8 +1,10 @@
-// Dashboard: Startseite mit Grummel als Freund und den App-Symbolen.
-// Grummel reagiert aufs Streicheln (Finger über ihn ziehen), Antippen, Schütteln und auf Stimme (nur der Pegel).
-// Ab und zu fragt er in einer Sprechblase „Wie geht's dir?“; Antippen der Blase öffnet den Check-in.
+// Dashboard: Grummels Zuhause. Grummel ist ein sanftes Haustier (siehe pet.h): Er schlüpft aus einem Ei,
+// wächst durch Pflege und zeigt oben drei Bedürfnisse (Apfel = satt, Herz = gekuschelt, Ball = gespielt).
+// Er reagiert aufs Streicheln, Antippen, Schütteln und auf Stimme (nur der Pegel) und fragt ab und zu
+// „Wie geht's dir?“ (Antippen der Blase öffnet den Check-in). Darunter liegen die App-Symbole.
 #pragma once
 #include "input.h"
+#include "pet.h"
 #include "synth.h"
 #include "tile.h"
 
@@ -10,12 +12,13 @@ namespace dk {
 
 class Home : public Tile {
  public:
-  struct AppIcon { const char* label; int tile; int kind; };   // kind: 0 Gefühle, 1 Grummel, 2 Atmen, 3 Kugel, 4 Pferde
+  struct AppIcon { const char* label; int tile; int kind; };   // kind: 0 Gefühle, 1 Grummel, 2 Atmen, 3 Kugel, 4 Pferde, 5 Rätsel
   Home(Synth& synth, Store& store);
   void setApps(const AppIcon* apps, int n) { apps_ = apps; nApps_ = n; }
   void setCheckIn(int tile) { checkin_ = tile; }
   const char* title() const override { return "Start"; }
   void enter(uint32_t ms) override;
+  void leave() override { pet_.save(store_); }
   void tick(const TileInput& in) override;
   void draw(Scene& s) override;
   bool wantsMotion() const override { return true; }
@@ -23,11 +26,17 @@ class Home : public Tile {
   bool showsClose() const override { return false; }
 
   static void iconPos(int i, int n, float& x, float& y);
-  static constexpr float BUDDY_X = W / 2, BUDDY_Y = 134, BUDDY_R = 50;   // Grummel
+  static void needPos(int i, float& x, float& y);
+  static constexpr float BUDDY_X = W / 2, BUDDY_Y = 160;
+  const Pet& pet() const { return pet_; }   // für den Simulator
 
  private:
-  void say(const char* text, float secs);
+  void say(const char* text, float secs, bool ask = false);
+  void feed();
+  bool asleep() const;
   void drawBuddy(Scene& s);
+  void drawEgg(Scene& s);
+  void drawNeeds(Scene& s);
   void drawIcon(Scene& s, const AppIcon& a, float x, float y);
   int cardsWaiting() const;
   float rnd();
@@ -37,14 +46,19 @@ class Home : public Tile {
   const AppIcon* apps_ = nullptr;
   int nApps_ = 0, checkin_ = -1;
   uint32_t seed_ = 0x9e3779b9;
-  float clock_ = 0, idle_ = 0;
+  float clock_ = 0, askT_ = 4, saveT_ = 30;
   uint32_t lastSeen_ = 0;   // ms, zuletzt auf dem Dashboard (Begrüßung nur nach längerer Pause)
+  int64_t epoch_ = 0;
+
+  Pet pet_;
+  float R_ = 46;            // aktueller Radius (gleitet zur Stufengröße)
+  float hatchT_ = -1, growT_ = -1;
   // Grummels Zustand
   float purr_ = 0, giggle_ = 0, dizzy_ = 0, listen_ = 0, startle_ = 0, blink_ = 3, lookX_ = 0, lookY_ = 0;
-  float sq_ = 0, sqv_ = 0, strokeAcc_ = 0, voiceT_ = 0;
-  bool onBuddy_ = false;
+  float sq_ = 0, sqv_ = 0, strokeAcc_ = 0, cuddleAcc_ = 0, voiceT_ = 0, chew_ = 0;
+  float foodT_ = -1;        // Apfel fliegt (0..1), dann wird gekaut
+  bool onBuddy_ = false, hadFinger_ = false;
   float lastFX_ = 0, lastFY_ = 0;
-  bool hadFinger_ = false;
   // Sprechblase
   char bubble_[48] = "";
   float bubbleT_ = 0, bubbleDur_ = 1;

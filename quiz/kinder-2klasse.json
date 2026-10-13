@@ -1,0 +1,51 @@
+{
+  "pack": "kinder-2klasse",
+  "hinweis": "Rätsel für die 2. Klasse, von Hand geschrieben: Rechnen bis 100 und kleines Einmaleins, Zählen mit Bild, Tiere und Natur, Zeit, Sprache, Körper. \"bild\": zaehl:<Anzahl>:<apfel|stern|herz|ball> zeigt Dinge zum Zählen.",
+  "fragen": [
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist 8 + 5?", "antworten": ["13", "12", "14"], "richtig": 0, "erklaerung": "8 + 2 sind 10, dazu noch 3 macht 13."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist 15 - 7?", "antworten": ["8", "7", "9"], "richtig": 0, "erklaerung": "15 - 5 sind 10, dann noch 2 weg macht 8."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist 2 × 5?", "antworten": ["10", "7", "12"], "richtig": 0, "erklaerung": "Zwei Hände mit je 5 Fingern sind 10 Finger."},
+    {"kategorie": "Rechnen", "schwierigkeit": "mittel", "frage": "Was ist 3 × 10?", "antworten": ["30", "13", "31"], "richtig": 0, "erklaerung": "10 + 10 + 10 sind 30."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist die Hälfte von 20?", "antworten": ["10", "5", "15"], "richtig": 0, "erklaerung": "10 und 10 sind zusammen 20."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist 40 + 30?", "antworten": ["70", "60", "80"], "richtig": 0, "erklaerung": "4 Zehner und 3 Zehner sind 7 Zehner, also 70."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist das Doppelte von 6?", "antworten": ["12", "8", "16"], "richtig": 0, "erklaerung": "6 + 6 sind 12."},
+    {"kategorie": "Rechnen", "schwierigkeit": "mittel", "frage": "Was ist 100 - 1?", "antworten": ["99", "90", "101"], "richtig": 0, "erklaerung": "Eins weniger als 100 ist 99."},
+    {"kategorie": "Rechnen", "schwierigkeit": "mittel", "frage": "Was ist 5 × 5?", "antworten": ["25", "20", "30"], "richtig": 0, "erklaerung": "5, 10, 15, 20, 25."},
+    {"kategorie": "Rechnen", "schwierigkeit": "leicht", "frage": "Was ist 9 + 9?", "antworten": ["18", "17", "19"], "richtig": 0, "erklaerung": "10 + 10 sind 20, zwei weniger sind 18."},
+
+    {"kategorie": "Zählen", "schwierigkeit": "leicht", "frage": "Wie viele Äpfel sind das?", "antworten": ["7", "6", "8"], "richtig": 0, "erklaerung": "Zähl mit dem Finger mit: 7 Äpfel.", "bild": "zaehl:7:apfel"},
+    {"kategorie": "Zählen", "schwierigkeit": "leicht", "frage": "Wie viele Sterne sind das?", "antworten": ["9", "8", "10"], "richtig": 0, "erklaerung": "Es sind 9 Sterne.", "bild": "zaehl:9:stern"},
+    {"kategorie": "Zählen", "schwierigkeit": "leicht", "frage": "Wie viele Herzen sind das?", "antworten": ["5", "4", "6"], "richtig": 0, "erklaerung": "Eine Hand voll: 5 Herzen.", "bild": "zaehl:5:herz"},
+    {"kategorie": "Zählen", "schwierigkeit": "mittel", "frage": "Wie viele Bälle sind das?", "antworten": ["12", "11", "13"], "richtig": 0, "erklaerung": "3 Reihen mit je 4 Bällen sind 12.", "bild": "zaehl:12:ball"},
+
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Wie viele Beine hat eine Spinne?", "antworten": ["8", "6", "4"], "richtig": 0, "erklaerung": "Spinnen haben 8 Beine, Insekten nur 6."},
+    {"kategorie": "Tiere", "schwierigkeit": "mittel", "frage": "Wie viele Beine hat ein Käfer?", "antworten": ["6", "8", "4"], "richtig": 0, "erklaerung": "Käfer sind Insekten, und Insekten haben 6 Beine."},
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Welches Tier legt Eier?", "antworten": ["Huhn", "Hund", "Katze"], "richtig": 0, "erklaerung": "Hühner legen Eier. Hunde und Katzen bekommen Babys."},
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Was frisst ein Pferd am liebsten?", "antworten": ["Heu und Gras", "Fleisch", "Fisch"], "richtig": 0, "erklaerung": "Pferde fressen Pflanzen: Gras, Heu und gern mal eine Möhre."},
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Wie heißt ein Pferdebaby?", "antworten": ["Fohlen", "Kalb", "Lamm"], "richtig": 0, "erklaerung": "Ein Pferdebaby heißt Fohlen."},
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Wie heißt ein Kuhbaby?", "antworten": ["Kalb", "Fohlen", "Ferkel"], "richtig": 0, "erklaerung": "Ein Kuhbaby heißt Kalb, ein Schweinebaby Ferkel."},
+    {"kategorie": "Tiere", "schwierigkeit": "mittel", "frage": "Wo wohnt ein Fuchs?", "antworten": ["Im Bau", "Im Nest", "Im Stall"], "richtig": 0, "erklaerung": "Füchse graben sich einen Bau in die Erde."},
+    {"kategorie": "Tiere", "schwierigkeit": "leicht", "frage": "Welcher Vogel kann nicht fliegen?", "antworten": ["Pinguin", "Amsel", "Spatz"], "richtig": 0, "erklaerung": "Pinguine können nicht fliegen, aber super schwimmen."},
+    {"kategorie": "Natur", "schwierigkeit": "leicht", "frage": "Was brauchen Pflanzen zum Wachsen?", "antworten": ["Wasser und Licht", "Schokolade", "Nur Sand"], "richtig": 0, "erklaerung": "Pflanzen brauchen Wasser, Licht und Erde."},
+    {"kategorie": "Natur", "schwierigkeit": "leicht", "frage": "In welcher Jahreszeit fallen die Blätter?", "antworten": ["Herbst", "Sommer", "Frühling"], "richtig": 0, "erklaerung": "Im Herbst werden die Blätter bunt und fallen ab."},
+
+    {"kategorie": "Zeit", "schwierigkeit": "leicht", "frage": "Wie viele Tage hat eine Woche?", "antworten": ["7", "5", "10"], "richtig": 0, "erklaerung": "Montag bis Sonntag, das sind 7 Tage."},
+    {"kategorie": "Zeit", "schwierigkeit": "leicht", "frage": "Welcher Monat kommt nach Mai?", "antworten": ["Juni", "April", "Juli"], "richtig": 0, "erklaerung": "April, Mai, Juni, Juli."},
+    {"kategorie": "Zeit", "schwierigkeit": "leicht", "frage": "Wie viele Monate hat ein Jahr?", "antworten": ["12", "10", "7"], "richtig": 0, "erklaerung": "Von Januar bis Dezember sind es 12 Monate."},
+    {"kategorie": "Zeit", "schwierigkeit": "mittel", "frage": "Wie viele Minuten hat eine Stunde?", "antworten": ["60", "100", "30"], "richtig": 0, "erklaerung": "Eine Stunde hat 60 Minuten. Eine halbe Stunde hat 30."},
+    {"kategorie": "Zeit", "schwierigkeit": "leicht", "frage": "Welcher Tag kommt nach Freitag?", "antworten": ["Samstag", "Sonntag", "Donnerstag"], "richtig": 0, "erklaerung": "Nach Freitag kommt Samstag, dann Sonntag."},
+
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Was reimt sich auf Haus?", "antworten": ["Maus", "Baum", "Hund"], "richtig": 0, "erklaerung": "Haus und Maus klingen am Ende gleich."},
+    {"kategorie": "Sprache", "schwierigkeit": "mittel", "frage": "Was reimt sich auf Kuchen?", "antworten": ["suchen", "Torte", "Kekse"], "richtig": 0, "erklaerung": "Kuchen und suchen klingen am Ende gleich."},
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Wie viele Silben hat Banane?", "antworten": ["3", "2", "4"], "richtig": 0, "erklaerung": "Ba-na-ne: Klatsch mit, das sind 3 Silben."},
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Wie viele Silben hat Pferd?", "antworten": ["1", "2", "3"], "richtig": 0, "erklaerung": "Pferd hat nur eine Silbe: einmal klatschen."},
+    {"kategorie": "Sprache", "schwierigkeit": "mittel", "frage": "Welches Wort ist ein Namenwort?", "antworten": ["Tisch", "laufen", "schön"], "richtig": 0, "erklaerung": "Namenwörter schreibt man groß, zum Beispiel der Tisch."},
+    {"kategorie": "Sprache", "schwierigkeit": "mittel", "frage": "Welches Wort ist ein Tunwort?", "antworten": ["springen", "Hund", "rot"], "richtig": 0, "erklaerung": "Tunwörter sagen, was man tut: springen, lachen, malen."},
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Womit beginnt das Wort Apfel?", "antworten": ["A", "E", "O"], "richtig": 0, "erklaerung": "A wie Apfel."},
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Was ist das Gegenteil von groß?", "antworten": ["klein", "lang", "dick"], "richtig": 0, "erklaerung": "Ein Shetlandpony ist klein, ein Shire Horse groß."},
+    {"kategorie": "Sprache", "schwierigkeit": "leicht", "frage": "Was ist das Gegenteil von warm?", "antworten": ["kalt", "heiß", "nass"], "richtig": 0, "erklaerung": "Warm und kalt sind Gegenteile."},
+
+    {"kategorie": "Körper", "schwierigkeit": "leicht", "frage": "Wie viele Finger hat eine Hand?", "antworten": ["5", "4", "10"], "richtig": 0, "erklaerung": "Eine Hand hat 5 Finger, zwei Hände haben 10."},
+    {"kategorie": "Körper", "schwierigkeit": "leicht", "frage": "Womit riechen wir?", "antworten": ["Mit der Nase", "Mit den Ohren", "Mit den Augen"], "richtig": 0, "erklaerung": "Mit der Nase riechen wir, mit den Ohren hören wir."}
+  ]
+}
