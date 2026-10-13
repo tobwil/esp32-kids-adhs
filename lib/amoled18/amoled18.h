@@ -25,7 +25,8 @@ bool readTouch(bool& down, int16_t& x, int16_t& y);
 bool imuOk();
 bool readAccel(float v[3]);
 
-// Lautsprecher: I2S + ES8311 + Verstärker. Danach mit i2s().write() Stereo-16-Bit schreiben.
+// Lautsprecher und Mikrofon: I2S + ES8311 + Verstärker. Danach mit i2s().write() Stereo-16-Bit schreiben,
+// mit i2s().readBytes() das Mikrofon lesen (Stereo-16-Bit, das Mikrofon liegt auf dem linken Kanal).
 bool audioBegin(uint32_t rate, int volume);
 I2SClass& i2s();
 

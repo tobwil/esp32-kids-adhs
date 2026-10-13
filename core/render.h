@@ -60,6 +60,8 @@ class Scene {
 
   // Messung: Rechenzeit je Formtyp (µs), nur wenn timer gesetzt ist
   static uint32_t (*timer)();
+  // Prüfung (Simulator): wird für jeden Text mit seinem Rechteck aufgerufen
+  static void (*textHook)(const char* s, float x0, float y0, float x1, float y1);
   mutable uint32_t kindUs[9] = {};
   static const char* kindName(int k);
 

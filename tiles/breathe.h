@@ -10,10 +10,9 @@ namespace dk {
 class Breathe : public Tile {
  public:
   Breathe(Synth& synth, Store& store) : synth_(synth), store_(store) {}
-  void setHome(int tile) { home_ = tile; }
   const char* title() const override { return "Atmen"; }
   void enter(uint32_t) override { phase_ = IDLE; t_ = 0; }
-  void arrive() override { start(); }   // vom Check-in geschickt: gleich loslegen
+  void arrive(bool returning) override { if (!returning) start(); }   // geöffnet: gleich loslegen
   void tick(const TileInput& in) override;
   void draw(Scene& s) override;
   bool keepAwake() const override { return phase_ != IDLE; }
@@ -27,7 +26,6 @@ class Breathe : public Tile {
 
   Synth& synth_;
   Store& store_;
-  int home_ = -1;
   Phase phase_ = IDLE;
   float t_ = 0, clock_ = 0;
   int round_ = 0, lastHalf_ = -1;

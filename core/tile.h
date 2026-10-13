@@ -22,6 +22,7 @@ struct TileInput {
   float shake = 0;
   float framePeak = 0;            // für die Messwert-Anzeige
   float tiltX = 0, tiltY = 0, tiltZ = 1;   // Neigung (g, Bildschirmachsen: x rechts, y oben, z aus dem Bildschirm)
+  float voice = 0;                // Lautstärke am Mikrofon 0..1 (nur der Pegel, nichts wird aufgenommen)
   float threshold = 0;
 };
 
@@ -31,14 +32,17 @@ class Tile {
   virtual const char* title() const = 0;
   virtual void enter(uint32_t ms) {}
   virtual void leave() {}
-  virtual void arrive() {}   // wurde von einer anderen Kachel hierher geschickt (nach enter)
-  // Wunsch, zu einer anderen Kachel zu wechseln (Index, -1 = keiner); die App holt ihn nach jedem tick ab
+  // per Navigation hierher gekommen (nach enter). returning: zurück aus einer App, die diese Kachel geöffnet hatte
+  virtual void arrive(bool returning) {}
+  // Wunsch, zu einer anderen Kachel zu wechseln (Index oder GOTO_BACK/GOTO_HOME, -1 = keiner); die App holt ihn nach jedem tick ab
+  static constexpr int GOTO_BACK = -2, GOTO_HOME = -3;
   int takeGoto() { const int g = goto_; goto_ = -1; return g; }
+  virtual bool showsClose() const { return true; }   // ✕ oben rechts zum Schließen (nicht auf dem Dashboard)
   virtual void tick(const TileInput& in) = 0;
   virtual void draw(Scene& s) = 0;
   virtual bool keepAwake() const { return false; }   // Display nicht dimmen (z. B. Meeting läuft, Grummel frisst)
   virtual bool wantsMotion() const { return false; }
-  // Kachel nutzt den Finger selbst (Joystick): Wischen zu anderen Kacheln nur vom Rand, kein langer Druck
+  // Kachel nutzt den Finger selbst (Joystick, Streicheln): langes Halten öffnet keine Einstellungen
   virtual bool claimsDrag() const { return false; }
   virtual float motionThreshold() const { return 0.10f; }
 

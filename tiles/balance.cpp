@@ -211,7 +211,7 @@ void Balance::tick(const TileInput& in) {
       break;
     case PAUSE:
       if (t_ > 4 || (in.tap && t_ > 1)) {
-        if (home_ >= 0) requestGoto(home_);
+        requestGoto(GOTO_BACK);
         inSession_ = 0;
         startLevel();
       }
@@ -259,7 +259,10 @@ void Balance::draw(Scene& s) {
       const float a = smooth(t_ / 0.3f) * (1 - smooth((t_ - 0.9f) / 0.3f));
       snprintf(buf, sizeof buf, "Runde %d", level_ + 1);
       s.text(fonts::title, buf, W / 2, 196, TXT, a, Align::Center);
-      if (level_ == 0) s.text(fonts::body, tilt_ ? "Kipp mich, dann rollt die Kugel" : "Die Kugel rollt zu deinem Finger", W / 2, 240, TXT_DIM, a, Align::Center);
+      if (level_ == 0) {
+        s.text(fonts::body, tilt_ ? "Kipp mich, dann" : "Die Kugel rollt", W / 2, 240, TXT_DIM, a, Align::Center);
+        s.text(fonts::body, tilt_ ? "rollt die Kugel" : "zu deinem Finger", W / 2, 270, TXT_DIM, a, Align::Center);
+      }
       break;
     }
     case DONE: {

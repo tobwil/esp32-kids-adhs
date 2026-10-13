@@ -89,6 +89,7 @@ static const fonts::Glyph* findGlyph(const fonts::Font& f, uint32_t cp) {
 }
 
 uint32_t (*Scene::timer)() = nullptr;
+void (*Scene::textHook)(const char*, float, float, float, float) = nullptr;
 
 const char* Scene::kindName(int k) {
   static const char* const n[9] = {"ellipse", "blob", "glow", "bogen", "kapsel", "rechteck", "text", "stern", "bild"};
@@ -239,7 +240,9 @@ void Scene::text(const fonts::Font& f, const char* s, float x, float y, Col col,
   if (!s || !*s) return;
   Cmd c{};
   c.kind = TEXT; c.c0 = col; c.font = &f;
-  if (al != Align::Left) x -= al == Align::Center ? textW(f, s) * 0.5f : float(textW(f, s));
+  const int tw = textW(f, s);
+  if (al != Align::Left) x -= al == Align::Center ? tw * 0.5f : float(tw);
+  if (textHook && a * fade > 0.05f) textHook(s, x, y, x + tw, y + f.lineH);
   x += ox; y += oy;
   c.p[0] = std::round(x); c.p[1] = std::round(y);
   c.aux = int(chars_.size());

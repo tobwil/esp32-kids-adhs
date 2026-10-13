@@ -32,7 +32,7 @@ static inline float clampf(float v, float a, float b) { return v < a ? a : v > b
 static inline float smooth(float t) { t = clampf(t, 0, 1); return t * t * (3 - 2 * t); }
 
 void CheckIn::faceCenter(int i, float& x, float& y) {
-  static const float X[5] = {72, 184, 296, 128, 240}, Y[5] = {176, 176, 176, 318, 318};
+  static const float X[5] = {72, 184, 296, 128, 240}, Y[5] = {204, 204, 204, 330, 330};
   x = X[i]; y = Y[i];
 }
 
@@ -54,20 +54,12 @@ void CheckIn::log(int feeling, int64_t epoch) {
   store_.set("ci_n", (i + 1) % 30);
 }
 
-// wartende Pferdekarten (alle 3 Sterne eine, siehe Album)
-int CheckIn::cardsWaiting() const {
-  const int tot = store_.get("alb_tot", 0), earned = starsGet(store_) / 3;
-  const int e = earned < tot ? earned : tot;
-  return e - store_.get("alb_open", 0);
-}
-
 void CheckIn::tick(const TileInput& in) {
   t_ += in.dt;
   clock_ += in.dt;
   idle_ += in.dt;
   epoch_ = in.epoch;
   if (chosen_ < 0) {
-    if (in.tap && in.tapY > 396 && albumTile_ >= 0 && cardsWaiting() > 0) { requestGoto(albumTile_); return; }
     if (in.tap) {
       idle_ = 0;
       for (int i = 0; i < N_FEELINGS; i++) {
@@ -87,7 +79,7 @@ void CheckIn::tick(const TileInput& in) {
     // Antippen beschleunigt den Wechsel
     const bool go = t_ > GO_AFTER || (in.tap && t_ > 0.8f);
     if (chosen_ == FROH) {
-      if (go && t_ > HAPPY_BACK - (in.tap ? 3 : 0)) { chosen_ = -1; again_ = false; t_ = 0; }
+      if (go && t_ > HAPPY_BACK - (in.tap ? 3 : 0)) { chosen_ = -1; again_ = false; t_ = 0; requestGoto(GOTO_BACK); }
     } else if (go) {
       requestGoto(chosen_ == WUT ? grummelTile_ : breatheTile_);
       chosen_ = -1;
@@ -162,8 +154,9 @@ void CheckIn::draw(Scene& s) {
     // Frage oben; blendet nach einer Weile ohne Bedienung langsam weg (Einbrennschutz) und kommt wieder
     const float k = std::fmod(idle_, 40.f);
     const float qa = idle_ < 20 ? 1.f : 1 - smooth((k - 20) / 1.5f) * (1 - smooth((k - 36) / 1.5f));
-    s.text(fonts::title, again_ ? "Und wie fühlt sich" : "Wie fühlt sich", W / 2, 28, TXT, qa, Align::Center);
-    s.text(fonts::title, again_ ? "dein Bauch jetzt an?" : "dein Bauch an?", W / 2, 66, TXT, qa, Align::Center);
+    // unterhalb des ✕-Knopfs
+    s.text(fonts::title, again_ ? "Und wie fühlt sich" : "Wie fühlt sich", W / 2, 66, TXT, qa, Align::Center);
+    s.text(fonts::title, again_ ? "dein Bauch jetzt an?" : "dein Bauch an?", W / 2, 102, TXT, qa, Align::Center);
     for (int i = 0; i < N_FEELINGS; i++) {
       float x, y;
       faceCenter(i, x, y);
@@ -171,14 +164,7 @@ void CheckIn::draw(Scene& s) {
       drawFace(s, i, x, y, FACE_R, clock_);
       s.text(fonts::body, FEEL[i].label, x, y + FACE_R + 8, TXT_DIM, 1, Align::Center);
     }
-    if (albumTile_ >= 0 && cardsWaiting() > 0) {   // Hinweis auf eine neue Pferdekarte
-      const float p = 0.75f + 0.25f * std::sin(clock_ * 3);
-      s.rrect(W / 2 - 112, 402, 224, 34, 17, hex(0xffd166), p);
-      s.star(W / 2 - 88, 419, 9, hex(0x2a1a00), p);
-      s.text(fonts::body, "Neue Pferdekarte!", W / 2 + 12, 404, hex(0x2a1a00), p, Align::Center);
-    } else {
-      drawStarCount(s, W / 2, 404, starsGet(store_), 0.85f);
-    }
+    drawStarCount(s, W / 2, 408, starsGet(store_), 0.85f);
     return;
   }
   // gewähltes Gefühl rückt groß in die Mitte, die anderen verblassen

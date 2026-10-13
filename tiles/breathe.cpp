@@ -28,7 +28,7 @@ void Breathe::tick(const TileInput& in) {
       if (in.tap) start();
       break;
     case RUN: {
-      if (in.tap && t_ > 0.5f) { phase_ = IDLE; t_ = 0; if (home_ >= 0) requestGoto(home_); break; }   // abbrechen, ohne Vorwurf
+      if (in.tap && t_ > 0.5f) { phase_ = IDLE; t_ = 0; requestGoto(GOTO_BACK); break; }   // abbrechen, ohne Vorwurf
       if (t_ < intro_) break;
       const float L = in_ + out_, k = t_ - intro_;
       round_ = int(k / L);
@@ -45,7 +45,7 @@ void Breathe::tick(const TileInput& in) {
       break;
     }
     case DONE:
-      if (t_ > 3.5f || (in.tap && t_ > 1)) { phase_ = IDLE; t_ = 0; if (home_ >= 0) requestGoto(home_); }
+      if (t_ > 3.5f || (in.tap && t_ > 1)) { phase_ = IDLE; t_ = 0; requestGoto(GOTO_BACK); }
       break;
   }
 }

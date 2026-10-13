@@ -11,7 +11,6 @@ namespace dk {
 class Balance : public Tile {
  public:
   Balance(Synth& synth, Store& store);
-  void setHome(int tile) { home_ = tile; }
   const char* title() const override { return "Kugel ins Loch"; }
   void enter(uint32_t ms) override;
   void tick(const TileInput& in) override;
@@ -38,7 +37,6 @@ class Balance : public Tile {
 
   Synth& synth_;
   Store& store_;
-  int home_ = -1;
   Phase phase_ = START;
   float t_ = 0, clock_ = 0;
   int level_ = 0, inSession_ = 0, stars_ = 0;

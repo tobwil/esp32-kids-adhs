@@ -369,7 +369,7 @@ void Grummel::tick(const TileInput& in) {
       breath_ = approach(breath_, 0, 2, dt);
       if (t_ > THANKS_DUR) {
         setPhase(DOZE);
-        if (skin_.kid && home_ >= 0) requestGoto(home_);   // „Und wie fühlt sich dein Bauch jetzt an?“
+        if (skin_.kid) requestGoto(GOTO_BACK);   // zurück, z. B. zum Check-in: „Und wie fühlt sich dein Bauch jetzt an?“
       }
       break;
     case CALIB:

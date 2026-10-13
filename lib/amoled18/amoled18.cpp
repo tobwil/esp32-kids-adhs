@@ -105,7 +105,8 @@ bool audioBegin(uint32_t rate, int volume) {
   if (es8311_init(es, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
   es8311_voice_volume_set(es, volume, nullptr);
-  es8311_microphone_config(es, false);
+  es8311_microphone_config(es, false);              // analoges Mikrofon
+  es8311_microphone_gain_set(es, ES8311_MIC_GAIN_24DB);
   return true;
 }
 

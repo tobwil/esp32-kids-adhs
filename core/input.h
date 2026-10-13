@@ -15,6 +15,7 @@ struct Input {
   bool boot = false;       // BOOT-Taste gedrückt
   uint32_t ms = 0;
   int64_t epoch = 0;       // Unix-Zeit in Sekunden (Ortszeit), 0 = unbekannt
+  float voice = 0;         // Mikrofonpegel 0..1 (geglättet), 0 = kein Mikrofon
 };
 
 struct Store {   // dauerhafte Werte (NVS auf dem Gerät, Datei im Simulator)

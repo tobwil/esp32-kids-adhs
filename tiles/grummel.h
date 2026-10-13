@@ -29,7 +29,6 @@ extern const GrummelSkin OFFICE_SKIN, KID_SKIN;
 class Grummel : public Tile {
  public:
   Grummel(Synth& synth, Store& store, uint32_t seed, const GrummelSkin& skin = OFFICE_SKIN);
-  void setHome(int tile) { home_ = tile; }
   const char* title() const override { return skin_.title; }
   void enter(uint32_t ms) override;
   void tick(const TileInput& in) override;
@@ -120,7 +119,7 @@ class Grummel : public Tile {
   int peakI_ = 0;
   float thr_ = 0.1f;
   int allN_ = 0, wkId_ = -1, wkN_ = 0;   // Statistik (NVS)
-  int home_ = -1, stars_ = 0;
+  int stars_ = 0;
 };
 
 }  // namespace dk

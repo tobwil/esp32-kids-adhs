@@ -14,7 +14,7 @@
 //   {"file":"begin","path":"/pferde/3.jpg","size":N}, dann „F <base64>“ (je ≤ 512 Byte), dann {"file":"end"}
 //                  Datei ins LittleFS schreiben (tools/horses.py upload); {"album":"reload"} lädt Karten und Fotos neu
 //   klopf N        N künstliche Schläge im Abstand von 250 ms (Test ohne Tisch)
-//   kachel N       zur Kachel N wechseln (0 Check-in, 1 Grummel, 2 Atmen, 3 Kugel ins Loch, 4 Pferde-Album)
+//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   bench          Rasterzeit je Form messen
 //   prof           Rechenzeit je Formtyp im Zwei-Sekunden-Protokoll ein/aus
@@ -33,6 +33,7 @@
 #include "album.h"
 #include "album_builtin.h"
 #include "checkin.h"
+#include "home.h"
 #include "grummel.h"
 #include "oracle.h"
 #include "quiz_builtin.h"
@@ -63,7 +64,11 @@ static Synth synth;
 static NvsStore store;
 static App* app;
 static Scene scene;
-// Kinder-Aufbau: 0 Check-in (Start), 1 Grummel, 2 Atmen, 3 Kugel ins Loch, 4 Pferde-Album.
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album.
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM };
+static const Home::AppIcon APPS[] = {
+    {"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3}, {"Pferde", T_ALBUM, 4}};
+static Home* home;
 // Das Orakel kommt mit den Kinderfragen zurück.
 static bool fsOk = false;
 static Oracle* oracle = nullptr;
@@ -298,6 +303,29 @@ static void bench() {   // Zeit je Form über alle 28 Bänder
   heap_caps_free(t);
 }
 
+// ---------------- Mikrofon (Kern 0): nur der Pegel, nichts wird gespeichert ----------------
+static volatile float voiceLevel = 0, micDb = -120;
+static void micTask(void*) {
+  static int16_t buf[512];   // 256 Stereo-Frames ≈ 16 ms
+  float floorDb = 0, level = 0;
+  int count = 0;
+  for (;;) {
+    const size_t n = hw::i2s().readBytes(reinterpret_cast<char*>(buf), sizeof buf) / 4;
+    if (!n) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+    double sum = 0;
+    for (size_t i = 0; i < n; i++) { const float v = buf[2 * i]; sum += double(v) * v; }
+    const float db = 10 * log10f(float(sum / n) + 1e-3f) - 90.3f;   // dBFS
+    micDb = db;
+    // Grundgeräusch langsam nachführen, Sprache = deutlich darüber
+    if (++count < 60) floorDb = count == 1 ? db : floorDb + 0.2f * (db - floorDb);   // erste Sekunde: Grundgeräusch einlesen
+    else floorDb += (db < floorDb ? 0.2f : 0.002f) * (db - floorDb);
+    const float above = (db - floorDb - 8) / 20;   // ab 8 dB über dem Grundgeräusch, voll bei +28 dB
+    const float target = above < 0 ? 0 : above > 1 ? 1 : above;
+    level += (target - level) * (target > level ? 0.5f : 0.1f);
+    voiceLevel = level;
+  }
+}
+
 // ---------------- Serielle Befehle ----------------
 static int64_t epochBase = 0;   // Unix-Sekunden bei millis() == 0
 static bool imuStream = false;
@@ -385,6 +413,7 @@ static void pollSerial() {
                     fsOk ? "ok" : "fehlt", (long long)(epochBase ? epochBase + millis() / 1000 : 0), (unsigned long)(millis() / 1000));
       Serial.println(app->debug());
       Serial.printf("album %d Karten, %d aufgedeckt, Fotos dekodiert %d, Fehler %d, zuletzt %lu us\n", album->count(), album->owned(), images.decOk, images.decFail, (unsigned long)images.decUs);
+      Serial.printf("mikrofon %.1f dBFS, stimme %.2f\n", float(micDb), float(voiceLevel));
       Serial.printf("neigung x %.2f y %.2f z %.2f g\n", app->motion.tiltX, app->motion.tiltY, app->motion.tiltZ);
     } else if (!strncmp(line, "imureg ", 7)) {   // Testweise ein IMU-Register schreiben: imureg <reg hex> <wert hex>
       unsigned reg = 0, val = 0;
@@ -437,27 +466,26 @@ void setup() {
   fsOk = LittleFS.begin(true, "/littlefs", 10, "spiffs");
   if (!fsOk) Serial.println("LittleFS fehlt");
   app = new App(synth, store);
+  home = new Home(synth, store);
   checkin = new CheckIn(synth, store);
   grummel = new Grummel(synth, store, esp_random(), KID_SKIN);
   breathe = new Breathe(synth, store);
   balance = new Balance(synth, store);
   album = new Album(synth, store, esp_random());
   album->setImages(&images);
-  checkin->setTargets(1, 2);
-  grummel->setHome(0);
-  breathe->setHome(0);
-  balance->setHome(0);
-  checkin->setAlbum(4);
+  home->setApps(APPS, 5);
+  home->setCheckIn(T_CHECKIN);
+  checkin->setTargets(T_GRUMMEL, T_BREATHE);
   loadPack();
   loadAlbum();
+  app->add(home);
   app->add(checkin);
   app->add(grummel);
   app->add(breathe);
   app->add(balance);
   app->add(album);
-  app->setHome(0);
+  app->setHome(T_HOME);
   app->setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
-  app->setShowTitles(false);
   app->setPower(60000, 180000, true, false);   // aus bis zum Tippen, nach 1 min dunkler, nach 3 min schwarz; Klopfen weckt nicht
   app->begin(millis());
 
@@ -472,6 +500,7 @@ void setup() {
   xTaskCreatePinnedToCore(displayTask, "display", 4096, nullptr, 3, nullptr, 0);
   xTaskCreatePinnedToCore(inputTask, "input", 4096, nullptr, 4, nullptr, 0);
   if (audio) xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, 0);
+  if (audio) xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
 }
 
 void loop() {
@@ -509,6 +538,7 @@ void loop() {
       if (in.acc[i].ms >= fakeStart && u < 0.1f) in.acc[i].z += 0.4f * std::exp(-u / 0.012f) * std::sin(6.2831853f * 90 * u + 0.6f);
     }
   in.boot = hw::bootPressed();
+  in.voice = voiceLevel;
   in.ms = millis();
   in.epoch = epochBase ? epochBase + in.ms / 1000 : 0;
 

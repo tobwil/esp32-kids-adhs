@@ -1,13 +1,14 @@
 // Simulator für den Mac (SDL2): dieselbe App wie auf dem Gerät, Beschleunigung wird nachgebildet.
 // Maus = Finger (ziehen = wischen, lange drücken = Einstellungen), B = BOOT-Taste, Pfeiltasten = neigen, C = gerade,
 // Leertaste = auf den Tisch klopfen, 1/2/3 = leicht/mittel/fest klopfen, T (halten) = Tastatur tippen,
-// X (halten) = schütteln, P = Bildschirmfoto, Esc = Ende.
+// X (halten) = schütteln, M (halten) = sprechen, P = Bildschirmfoto, Esc = Ende.
 //
 // Ohne Fenster:
 //   dksim --screens <ordner>   Ablauf durchspielen und Bilder als BMP speichern
 //   dksim --bench              Rasterzeit pro Frame messen
 #include <SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include "balance.h"
 #include "breathe.h"
 #include "checkin.h"
+#include "home.h"
 #include "album.h"
 #include "album_builtin.h"
 #include "rewards.h"
@@ -139,6 +141,7 @@ struct FileImages : ImageStore {
     return ok;
   }
   Image get(std::map<int, std::vector<uint16_t>>& m, int id, const char* suffix, int w, int h) {
+    if (getenv("DK_NOPHOTOS")) return {};   // z. B. für Bilder im öffentlichen Repo
     auto it = m.find(id);
     if (it == m.end()) {
       std::vector<uint16_t> v;
@@ -151,8 +154,13 @@ struct FileImages : ImageStore {
   Image thumb(int id) override { return get(thumbs, id, "_t.rgb", THUMB_W, THUMB_H); }
 };
 
-// Kinder-Aufbau: 0 Check-in (Start), 1 Grummel, 2 Atmen, 3 Kugel ins Loch, 4 Pferde-Album
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM };
+static const Home::AppIcon APPS[] = {
+    {"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3}, {"Pferde", T_ALBUM, 4}};
+
 struct Kids {
+  Home home;
   CheckIn checkin;
   Grummel grummel;
   Breathe breathe;
@@ -160,24 +168,45 @@ struct Kids {
   Album album;
   FileImages images;
   Kids(Synth& synth, Store& store, uint32_t seed)
-      : checkin(synth, store), grummel(synth, store, seed, KID_SKIN), breathe(synth, store), balance(synth, store), album(synth, store, seed * 7 + 3) {
+      : home(synth, store), checkin(synth, store), grummel(synth, store, seed, KID_SKIN), breathe(synth, store), balance(synth, store), album(synth, store, seed * 7 + 3) {
     album.setImages(&images);
     album.load(ALBUM_BUILTIN);
-    checkin.setAlbum(4);
-    checkin.setTargets(1, 2);
-    grummel.setHome(0);
-    breathe.setHome(0);
-    balance.setHome(0);
+    home.setApps(APPS, 5);
+    home.setCheckIn(T_CHECKIN);
+    checkin.setTargets(T_GRUMMEL, T_BREATHE);
   }
   bool startOff = true;
   void addTo(App& app) {
-    app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album);
-    app.setHome(0);
+    app.add(&home); app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album);
+    app.setHome(T_HOME);
     app.setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
-    app.setShowTitles(false);
-    app.setPower(60000, 180000, startOff, false);   // Kinder: aus bis zum Tippen, nach 3 min wieder schwarz
+    app.setPower(60000, 180000, startOff, false);   // aus bis zum Tippen, nach 3 min wieder schwarz
   }
 };
+
+// ---- Textprüfung: Rand, runde Ecken, ✕-Knopf ----
+static App* gApp = nullptr;
+static std::vector<std::string> gIssues;
+static void checkText(const char* str, float x0, float y0, float x1, float y1) {
+  char why[64] = "";
+  const float CR = 46;   // Eckenradius des Displays (großzügig)
+  if (x0 < 8 || x1 > W - 8) snprintf(why, sizeof why, "über den Rand (x %.0f..%.0f)", x0, x1);
+  else if (y0 < 2 || y1 > H - 2) snprintf(why, sizeof why, "über den Rand (y %.0f..%.0f)", y0, y1);
+  else {
+    const float cx[2] = {CR, W - CR}, cy[2] = {CR, H - CR};
+    for (int i = 0; i < 2 && !why[0]; i++)
+      for (int j = 0; j < 2 && !why[0]; j++) {
+        const float px = i ? x1 : x0, py = j ? y1 - 6 : y0 + 6;   // Glyphen füllen die Zeile nicht ganz aus
+        const bool inCorner = (i ? px > cx[1] : px < cx[0]) && (j ? py > cy[1] : py < cy[0]);
+        if (inCorner && (px - cx[i]) * (px - cx[i]) + (py - cy[j]) * (py - cy[j]) > CR * CR) snprintf(why, sizeof why, "in der runden Ecke");
+      }
+  }
+  if (!why[0] && gApp && gApp->closeShown()) {
+    const float qx = std::fmax(x0, std::fmin(App::CLOSE_X, x1)), qy = std::fmax(y0 + 4, std::fmin(App::CLOSE_Y, y1 - 4));
+    if ((qx - App::CLOSE_X) * (qx - App::CLOSE_X) + (qy - App::CLOSE_Y) * (qy - App::CLOSE_Y) < (App::CLOSE_R + 3) * (App::CLOSE_R + 3)) snprintf(why, sizeof why, "unter dem ✕");
+  }
+  if (why[0]) { char b[160]; snprintf(b, sizeof b, "„%s“ %s", str, why); gIssues.push_back(b); }
+}
 
 static int screens(const char* dir) {
   Synth synth;
@@ -186,95 +215,76 @@ static int screens(const char* dir) {
   Kids kids(synth, store, 7);
   kids.startOff = false;
   kids.addTo(app);
+  gApp = &app;
+  Scene::textHook = checkText;
   Grummel& grummel = kids.grummel;
   Script sc{app, {}, {}, 1000, {}, dir};
   app.begin(sc.ms);
+  int nIssues = 0;
+  auto shot = [&](const char* name) {
+    gIssues.clear();
+    sc.shot(name);
+    std::sort(gIssues.begin(), gIssues.end());
+    gIssues.erase(std::unique(gIssues.begin(), gIssues.end()), gIssues.end());
+    for (auto& i : gIssues) { printf("  %s: %s\n", name, i.c_str()); nIssues++; }
+  };
   auto tapFace = [&](int i) { float x, y; CheckIn::faceCenter(i, x, y); sc.tap(int(x), int(y)); };
+  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, 5, x, y); sc.tap(int(x), int(y)); };
+  auto close = [&]() { sc.tap(int(App::CLOSE_X), int(App::CLOSE_Y)); sc.run(0.5f); };
   int guard = 0;
 
-  sc.run(2.0f); sc.shot("01_checkin");
-  tapFace(CheckIn::WUT); sc.run(0.9f); sc.shot("02_wut");
-  sc.run(3.5f); sc.shot("03_grummel");
-  sc.run(1.5f); sc.shot("03b_hinweis");
-  // schnelles Tippen an wechselnden Stellen
-  static const int TX[6] = {90, 280, 120, 250, 184, 70}, TY[6] = {120, 140, 340, 330, 90, 240};
-  for (int i = 0; i < 6; i++) { sc.tap(TX[i], TY[i]); sc.run(0.12f); }
-  sc.shot("04_laden");
-  int taps = 6;
-  while (grummel.phase() == Grummel::CHARGE && guard++ < 80) { sc.tap(TX[taps % 6], TY[taps % 6]); taps++; sc.run(0.15f); }
-  printf("Tipps bis satt: %d\n", taps);
-  sc.run(1.1f); sc.shot("05_boerps");
+  sc.run(1.0f); shot("00_dashboard_hallo");
+  sc.run(3.0f); shot("01_dashboard_frage");
+  // streicheln: Finger hin und her über Grummel
+  sc.touch(true, 140, 150); sc.frame();
+  for (int k = 0; k < 40; k++) { sc.touch(true, 140 + int(80 * std::fabs(std::sin(k * 0.25f))), 150 + (k % 7)); sc.frame(); }
+  shot("02_streicheln");
+  sc.touch(false, 180, 150); sc.frame(); sc.run(1.5f);
+  sc.tap(int(Home::BUDDY_X), int(Home::BUDDY_Y)); sc.run(0.4f); shot("03_kichern");
+  sc.run(1.5f);
+  sc.imu.shaking = true; sc.run(1.0f); shot("04_schwindelig"); sc.imu.shaking = false; sc.run(2.0f);
+  sc.in.voice = 0.5f; sc.run(1.2f); shot("05_zuhoeren"); sc.in.voice = 0; sc.run(0.4f); shot("05b_zugehoert"); sc.run(2.5f);
+  // Wie geht's dir? → wütend → Grummel → satt → atmen → zurück zum Check-in → froh → Dashboard
+  tapIcon(0); sc.run(0.8f); shot("06_checkin");
+  tapFace(CheckIn::WUT); sc.run(4.0f); shot("07_grummel");
+  static const int TX[6] = {90, 280, 120, 250, 184, 70}, TY[6] = {130, 140, 340, 330, 100, 240};
+  int taps = 0;
+  while (grummel.phase() != Grummel::FULL && guard++ < 120) { sc.tap(TX[taps % 6], TY[taps % 6]); taps++; sc.run(0.15f); if (taps == 8) shot("08_grummel_laden"); }
+  sc.run(1.1f); shot("09_boerps");
   while (grummel.phase() != Grummel::BREATHE && guard++ < 900) sc.run(0.1f);
-  sc.run(2.8f); sc.shot("06_atmen_ein");
-  sc.run(4.5f); sc.shot("07_atmen_aus");
+  sc.run(2.8f); shot("10_grummel_atmen");
   while (grummel.phase() != Grummel::THANKS && guard++ < 2000) sc.run(0.1f);
-  sc.run(1.2f); sc.shot("08_lecker");
-  while (!std::strstr(app.debug(), "Wie geht") && guard++ < 2200) sc.run(0.1f);
-  sc.run(1.0f); sc.shot("09_checkin_jetzt");
-  tapFace(CheckIn::KRIBBELIG); sc.run(0.9f); sc.shot("10_kribbelig");
-  sc.run(4.0f); sc.shot("11_ballon_start");
-  sc.run(3.2f); sc.shot("12_ballon_ein");
-  sc.run(4.0f); sc.shot("13_ballon_aus");
-  while (kids.breathe.phase() != Breathe::DONE && guard++ < 3000) sc.run(0.1f);
-  sc.run(1.8f); sc.shot("14_super");
-  sc.run(3.0f);
-  tapFace(CheckIn::TRAURIG); sc.run(1.2f); sc.shot("15_traurig");
-  sc.run(5.0f);
-  sc.tap(184, 200); sc.run(1.0f); sc.shot("16a_abgebrochen");   // Tipp bricht ab, zurück zum Check-in
-  sc.run(3.0f);
-  tapFace(CheckIn::FROH); sc.run(1.5f); sc.shot("16_froh");
-  sc.run(4.0f);
-  for (int i = 0; i < 5; i++) { sc.imu.knock(sc.ms, 0.3f); sc.run(0.1f); }   // Klopfen im Check-in bewirkt nichts
-  sc.touch(true, 184, 420); sc.run(1.2f); sc.shot("17_halten_1s");
-  sc.run(2.2f); sc.touch(false, 184, 420); sc.frame(); sc.run(0.5f); sc.shot("18_einstellungen");
-  sc.touch(false, 184, 420); sc.frame();
-  // Kugel ins Loch: Autopilot neigt das Gerät zur nächsten Kugel → Loch (PD-Regler)
-  sc.tap(184, 600); sc.run(0.3f);   // Einstellungen zu (Tipp daneben)
-  app.show(3);
-  Balance& bal = kids.balance;
-  float px = 0, py = 0;
-  int shots = 0;
-  bool fingerDown = false;
-  const int lvl0 = bal.level();
-  for (int f = 0; f < 30 * 120 && bal.level() < lvl0 + 4 && bal.phase() != Balance::PAUSE; f++) {
-    float bx, by, hx, hy;
-    int target = -1;
-    for (int i = 0; i < 3 && target < 0; i++) if (bal.ballPos(i, bx, by)) target = i;
-    if (bal.phase() == Balance::PLAY && target >= 0) {
-      bal.holePos(0, hx, hy);
-      if (bal.ballPos(1, px, py) && bal.level() == 6 && target == 1) bal.holePos(1, hx, hy);
-      static float lx = bx, ly = by;
-      const float vx = (bx - lx) * 30, vy = (by - ly) * 30;
-      lx = bx; ly = by;
-      // Finger als Joystick: Versatz von der Mitte gibt die Richtung vor (PD-Regler)
-      const float fx = 184 + std::fmax(-170.f, std::fmin(170.f, 1.6f * (hx - bx) - 0.25f * vx));
-      const float fy = 224 + std::fmax(-190.f, std::fmin(190.f, 1.8f * (hy - by) - 0.25f * vy));
-      sc.touch(true, int(fx), int(fy));
-      fingerDown = true;
-    } else if (fingerDown) {
-      sc.touch(false, 184, 224);
-      fingerDown = false;
-    }
-    sc.frame();
-    if (getenv("DKDEBUG") && f % 30 == 0) { float bx2 = 0, by2 = 0; bal.ballPos(0, bx2, by2); printf("f %d phase %d ball %.0f %.0f  %s\n", f, int(bal.phase()), bx2, by2, app.debug()); }
-    if (f == 40) sc.shot("19_runde");
-    static int doneShot = 0, lastLvl = -1;
-    if (bal.phase() == Balance::PLAY && bal.level() != lastLvl && bal.level() >= 1 && shots < 3) { lastLvl = bal.level(); sc.run(0.8f); char n[32]; snprintf(n, sizeof n, "2%d_rollen", shots++); sc.shot(n); }
-    if (bal.phase() == Balance::DONE && !doneShot) { sc.run(0.6f); sc.shot("23_geschafft"); doneShot = 1; }
-  }
-  printf("Kugel ins Loch: von Runde %d bis Runde %d gelöst, Phase %d\n", lvl0 + 1, bal.level(), int(bal.phase()));
-  sc.imu.tiltX = sc.imu.tiltY = 0;
-  while (bal.phase() != Balance::PAUSE && bal.phase() != Balance::START && guard++ < 6000) sc.run(0.1f);
-  // Pferde-Album: Sterne sammeln, Karte aufdecken, blättern, Karte ansehen und umdrehen
+  sc.run(1.2f); shot("11_lecker");
+  sc.run(5.0f); shot("12_checkin_jetzt");
+  tapFace(CheckIn::FROH); sc.run(1.5f); shot("13_froh");
+  sc.run(4.0f); shot("14_dashboard_zurueck");
+  // Atmen öffnen und mit ✕ schließen
+  tapIcon(2); sc.run(4.0f); shot("15_atmen");
+  close(); shot("16_dashboard_nach_x");
+  // Kugel ins Loch
+  tapIcon(3); sc.run(0.6f); shot("17_kugel_start");
+  sc.run(1.0f); sc.touch(true, 184, 400); sc.run(0.8f); shot("18_kugel_finger"); sc.touch(false, 184, 400); sc.frame();
+  close();
+  // Pferde-Album: 9 Sterne → Abzeichen, Karten aufdecken, blättern
   while (starsGet(store) < 9) starsAdd(store);
-  app.show(0); sc.run(1.0f); sc.shot("40_checkin_neue_karte");
-  sc.tap(184, 418); sc.run(1.2f); sc.shot("41_verdeckt");
-  sc.tap(184, 214); sc.run(0.6f); sc.shot("42_aufgedeckt");
-  sc.run(1.5f); sc.tap(184, 214); sc.run(0.6f); sc.shot("43_rueckseite");
-  sc.tap(184, 214); sc.run(0.6f);
-  for (int k = 0; k < 12 && kids.album.phase() != Album::GRID; k++) { sc.tap(184, 214); sc.run(1.2f); }   // weitere Karten aufdecken
-  sc.run(1.0f); sc.shot("44_album");
-  sc.tap(W - 70, 404); sc.run(0.6f); sc.shot("45_album_seite2");
+  sc.run(0.5f); shot("19_dashboard_karte_wartet");
+  tapIcon(4); sc.run(1.0f); shot("20_verdeckt");
+  sc.tap(184, 214); sc.run(0.6f); shot("21_aufgedeckt");
+  sc.run(1.5f); sc.tap(184, 214); sc.run(0.6f); shot("22_rueckseite");
+  for (int k = 0; k < 12 && kids.album.phase() != Album::GRID; k++) { sc.tap(184, 214); sc.run(1.2f); }
+  sc.run(0.8f); shot("23_album");
+  sc.tap(W - 70, 404); sc.run(0.6f); shot("24_album_seite2");
+  // alle Karten einmal ansehen (Textprüfung auf Vorder- und Rückseite)
+  for (int i = 0; i < kids.album.count(); i++) { while (starsGet(store) < 3 * (i + 1)) starsAdd(store); }
+  app.show(T_ALBUM);
+  for (int k = 0; k < 60 && kids.album.phase() != Album::GRID; k++) {
+    sc.tap(184, 214); sc.run(0.7f);
+    char n[32]; snprintf(n, sizeof n, "z%02d_karte", k); if (k % 2 == 0) shot(n);
+  }
+  close();
+  // Einstellungen: 3 s auf eine freie Stelle drücken
+  sc.touch(true, 30, 230); sc.run(3.4f); sc.touch(false, 30, 230); sc.frame(); sc.run(0.5f); shot("25_einstellungen");
+  printf("%d Textverstöße\n", nIssues);
   printf("Bilder in %s\n", dir);
   return 0;
 }
@@ -288,7 +298,7 @@ static int bench() {
   kids.addTo(app);
   Script sc{app, {}, {}, 1000, {}, "."};
   app.begin(sc.ms);
-  app.show(1);   // Grummel
+  app.show(T_GRUMMEL);
   for (int i = 0; i < 10; i++) { sc.imu.knock(sc.ms, 0.4f); sc.run(0.25f); }
   Uint64 f = SDL_GetPerformanceFrequency(), t0 = SDL_GetPerformanceCounter();
   int n = 300, cmds = 0;
@@ -364,6 +374,7 @@ int main(int argc, char** argv) {
     if (k[SDL_SCANCODE_UP]) imu.tiltY = std::fmin(20.f, imu.tiltY + 1.2f);
     if (k[SDL_SCANCODE_DOWN]) imu.tiltY = std::fmax(-20.f, imu.tiltY - 1.2f);
     if (k[SDL_SCANCODE_C]) imu.tiltX = imu.tiltY = 0;
+    in.voice = k[SDL_SCANCODE_M] ? 0.5f : 0.f;   // M halten = sprechen
     if (k[SDL_SCANCODE_T] && now >= typeNext) { imu.knock(now, 0.02f + 0.02f * (now % 7) / 7.f); typeNext = now + 90 + now % 60; }
     in.nTouch = 0;
     for (auto& t : touches) if (in.nTouch < 32) in.touch[in.nTouch++] = t;

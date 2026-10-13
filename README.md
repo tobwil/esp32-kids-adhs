@@ -4,11 +4,13 @@ Ein ruhiger Begleiter für Kinder auf dem **Waveshare ESP32-S3-Touch-AMOLED-1.8 
 
 ![Kinderversion im Simulator](doc/kinder-ablauf.png)
 
-## Kacheln
+## Dashboard und Apps
 
-| Kachel | Was passiert |
+Das Gerät startet schwarz, ein Tipp weckt es. Startseite ist das **Dashboard**: Oben wohnt Grummel als Freund. Er reagiert aufs Streicheln (Finger über ihn ziehen, Herzchen steigen auf), Antippen (kichert), Schütteln (Kringelaugen) und auf Stimme (hört zu). Vom Mikrofon wird nur der Pegel ausgewertet, nichts wird aufgenommen. Ab und zu fragt er in einer Sprechblase „Wie geht's dir?“. Darunter liegen die App-Symbole. Jede App öffnet bildschirmfüllend und schließt sich mit dem ✕ oben rechts. Ein Abzeichen am Pferde-Symbol zeigt, dass eine neue Karte wartet.
+
+| App | Was passiert |
 |---|---|
-| Wie geht's dir? (Start) | fünf Gesichter (wütend, kribbelig, traurig, müde, froh). Das Gerät schickt zum passenden Werkzeug und fragt danach noch einmal nach |
+| Gefühle (Wie geht's dir?) | fünf Gesichter (wütend, kribbelig, traurig, müde, froh). Das Gerät schickt zum passenden Werkzeug und fragt danach noch einmal nach |
 | Grummel | schnell aufs Display tippen, auf den Tisch klopfen oder schütteln: Wutfunken fliegen in Grummel, er wird satt, rülpst, verwandelt die Wut in Blasen und atmet mit („Riech an der Blume“, „Puste die Kerze aus“) |
 | Atmen | ein Ballon atmet mit: 4 s ein, 5 s aus, 4 Runden |
 | Kugel ins Loch | Kugeln ins Loch rollen, per Finger als Joystick oder per Neigen. Ohne Zeitdruck, nach 4 Runden kommt eine Pause |
@@ -21,9 +23,11 @@ Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestalt
 | Geste | Wirkung |
 |---|---|
 | Tippen, wenn das Display schwarz ist | aufwecken (das Gerät startet schwarz und geht nach 3 min Ruhe wieder aus) |
-| Gesicht antippen | Gefühl wählen |
-| nach links/rechts wischen | Kachel wechseln (im Ballspiel nur vom Rand aus) |
+| App-Symbol antippen | App öffnen |
+| ✕ oben rechts | App schließen, zurück zum Dashboard |
 | 3 s lang drücken oder BOOT | Einstellungen für Eltern (Ton, Klopf-Empfindlichkeit, Einmessen, Steuerung) |
+
+Apps, die aus „Wie geht's dir?“ heraus geöffnet wurden, kehren danach dorthin zurück („Und wie fühlt sich dein Bauch jetzt an?“).
 
 Jeder Check-in wird mit Uhrzeit (falls bekannt) im NVS gespeichert (`ci0`…`ci29`), ohne Namen, für eine spätere Elternseite im Heimnetz.
 
@@ -31,7 +35,7 @@ Jeder Check-in wird mit Uhrzeit (falls bekannt) im NVS gespeichert (`ci0`…`ci2
 
 ```
 core/        plattformunabhängig (C++17): Vektor-Renderer, Schriften, Synthesizer, Klopf-/Schüttel-Erkennung, Launcher
-tiles/       checkin, grummel (Büro- und Kinder-Skin), breathe, balance, album, horses (gezeichnete Pferde), oracle (Quiz)
+tiles/       home (Dashboard), checkin, grummel (Büro- und Kinder-Skin), breathe, balance, album, horses (gezeichnete Pferde), oracle (Quiz)
 firmware/    Gerät: Rendern auf Kern 1, Display/Eingabe/Audio auf Kern 0, LittleFS, JPEG, serielle Befehle
 lib/amoled18 Board-Schicht: Pins, Display (CO5300), Touch (CST816), IMU (QMI8658), Audio (ES8311)
 sim/         Simulator für den Mac (SDL2)
@@ -50,7 +54,7 @@ Simulator (braucht SDL2, z. B. `brew install sdl2`):
 make -C sim && sim/dksim
 ```
 
-Maus = Finger, Leertaste oder 1/2/3 = klopfen, T = Tastatur tippen, X = schütteln, Pfeiltasten = neigen, B = BOOT, P = Bildschirmfoto. `sim/dksim --screens <ordner>` spielt alle Abläufe durch und speichert Bilder.
+Maus = Finger, Leertaste oder 1/2/3 = klopfen, T = Tastatur tippen, X = schütteln, M = sprechen, Pfeiltasten = neigen, B = BOOT, P = Bildschirmfoto. `sim/dksim --screens <ordner>` spielt alle Abläufe durch, speichert Bilder und meldet jeden Text, der über den Rand, in die runden Ecken oder unter das ✕ ragt.
 
 Gerät (PlatformIO):
 
@@ -75,9 +79,9 @@ tools/.venv/bin/python tools/horses.py upload     # aufs Gerät (LittleFS)
 
 | Befehl | Wirkung |
 |---|---|
-| `status` | Fragenpaket, Album, Dateisystem, Uhrzeit, Kachel, Neigung |
+| `status` | Fragenpaket, Album, Dateisystem, Uhrzeit, Kachel, Mikrofonpegel, Neigung |
 | `log` | Zwei-Sekunden-Protokoll (fps, Zeiten, Ruckler) ein/aus, startet aus |
-| `kachel N` | zu Kachel N (0 Check-in, 1 Grummel, 2 Atmen, 3 Kugel ins Loch, 4 Pferde-Album) |
+| `kachel N` | zu Kachel N (0 Dashboard, 1 Gefühle, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album) |
 | `tipp X Y` | Tippen an Display-Position X, Y |
 | `klopf N` | N künstliche Schläge im Abstand von 250 ms |
 | `imu`, `imuraw`, `imureg R V` | Messwerte, Rohregister, Register schreiben (Fehlersuche) |

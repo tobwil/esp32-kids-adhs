@@ -141,7 +141,7 @@ static void wrapped(Scene& s, const char* text, const fonts::Font& f, float y, f
 
 void Album::drawGrid(Scene& s) {
   char buf[48];
-  s.text(fonts::title, "Mein Pferde-Album", W / 2, 20, TXT, 1, Align::Center);
+  s.text(fonts::title, "Pferde-Album", W / 2, 20, TXT, 1, Align::Center);
   snprintf(buf, sizeof buf, "%d von %d Pferden", opened_, count());
   s.text(fonts::small, buf, W / 2, 56, TXT_DIM, 1, Align::Center);
   auto owned = [&](int i) { for (int k = 0; k < opened_; k++) if (order_[k] == i) return true; return false; };
