@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Eltern-Portal fürs Heimnetz: Radio-Sender (eigene Aufnahmen, Spotify-Playlists), Sperre, Lautstärke, Schlaf-Timer.
 
-  tools/.venv/bin/python tools/portal/portal.py [--port 8770] [--daten <ordner>]
+  tools/.venv/bin/python tools/portal/portal.py [--port 8770] [--daten <ordner>] [--spotify]
+
+Spotify ist aus (librespot bekommt bei vielen Konten keine Audio-Schlüssel mehr). --spotify schaltet es wieder ein.
 
 Dann im Browser am Mac: http://127.0.0.1:8770 (Spotify-Anmeldung geht nur dort), vom Handy: http://<mac-name>.local:8770
 
@@ -54,6 +56,7 @@ sys.path.insert(0, os.path.dirname(HERE))   # tools/: Bildfunktionen aus horses.
 # Kacheln auf dem Gerät (Index wie in firmware/main.cpp), für „Apps an/aus“
 APPS = [(1, "Wie geht's dir?"), (2, "Grummel"), (3, "Atmen"), (4, "Kugel ins Loch"), (5, "Sammelalbum"), (6, "Rätsel"), (7, "Radio"), (8, "Post")]
 MAX_CONTACTS = 4
+SPOTIFY = "--spotify" in sys.argv   # derzeit aus, siehe oben
 MAX_CARDS = 48
 lock = threading.RLock()
 
@@ -273,22 +276,37 @@ def find_source(sid):
     return None
 
 
+def sources():
+    """Sender fürs Gerät (Spotify nur, wenn eingeschaltet)."""
+    return [s for s in cfg["quellen"] if s["art"] == "aufnahme" or SPOTIFY]
+
+
+def parts(s):
+    """Dateinamen (ohne .pcm) einer Aufnahme: eine Datei oder Teile <id>_1 … <id>_n."""
+    if s["art"] != "aufnahme":
+        return []
+    return [f"{s['id']}_{k}" for k in range(1, s["teile"] + 1)] if s.get("teile") else [s["id"]]
+
+
 def device_reply():
     with lock:
         lines = [f"zeit {local_epoch()}",
                  f"sperre {cfg['sperre']['modus']} {cfg['sperre']['von']} {cfg['sperre']['bis']}",
                  f"laut {cfg['laut']}", f"schlaf {cfg['schlaf']}"]
-        for s in cfg["quellen"]:
+        for s in sources():
             lines.append(f"quelle {s['id']} {s['art']} {s['name']}")
+            if s.get("teile"):   # mehrteilig (Hörspiel-CD): Teile <id>_1 … <id>_n
+                lines.append(f"teile {s['id']} {s['teile']}")
         lines.append(f"apps {int(cfg.get('apps_aus', 0))}")
         lines.append(f"fragen {quiz_version():08x}")
         w = cfg["wecker"]
         lines.append(f"wecker {1 if w['an'] else 0} {w['min']} {w['tage']} {w['ton'] or 'melodie'}")
         lines.append(f"nacht {1 if cfg.get('nachtlicht') else 0}")
-        for s in cfg["quellen"]:   # Aufnahmen für die Offline-Bibliothek auf der SD-Karte
-            p = os.path.join(REC, s["id"] + ".pcm")
-            if s["art"] == "aufnahme" and os.path.exists(p):
-                lines.append(f"datei {s['id']} {os.path.getsize(p)}")
+        for s in sources():   # Aufnahmen für die Offline-Bibliothek auf der SD-Karte
+            for name in parts(s):
+                p = os.path.join(REC, name + ".pcm")
+                if os.path.exists(p):
+                    lines.append(f"datei {name} {os.path.getsize(p)}")
         for k in cfg["kontakte"]:
             lines.append(f"kontakt {k['id']} {k['name']}")
         names = {k["id"]: k["name"] for k in cfg["kontakte"]}
@@ -296,8 +314,8 @@ def device_reply():
             lines.append(f"nachricht {m['id']} {1 if m.get('gehoert') else 0} {names.get(m['kontakt'], 'Eltern')}")
         aid = cfg.get("album", "pferde")
         lines.append(f"album {aid} {album_version(aid):08x}" if aid != "pferde" else "album pferde 0")
-        hint = spotify_hint
-        if not hint and any(s["art"] == "spotify" for s in cfg["quellen"]) and not tokens().get("refresh_token"):
+        hint = spotify_hint if SPOTIFY else ""
+        if SPOTIFY and not hint and any(s["art"] == "spotify" for s in cfg["quellen"]) and not tokens().get("refresh_token"):
             hint = "Spotify ist nicht verbunden"
         if hint:
             lines.append("hinweis " + hint[:60])
@@ -613,18 +631,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
-        q = dict(urllib.parse.parse_qsl(u.query))
+        q = dict(urllib.parse.parse_qsl(u.query, keep_blank_values=True))
         try:
             if u.path == "/api/aufnahme":
                 raw = self.body()
                 # der Browser wandelt inzwischen selbst um (16 kHz mono PCM), sonst ffmpeg
                 pcm = raw if q.get("typ") == "pcm16" else convert(raw, "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
                 with lock:
-                    sid = new_id("a")
-                    with open(os.path.join(REC, sid + ".pcm"), "wb") as f:
+                    secs = round(len(pcm) / 2 / RATE)
+                    s = find_source(q.get("zu", "")) if "zu" in q else None
+                    if "zu" in q and not (s and s.get("teile")):
+                        raise RuntimeError("Sender zum Anhängen nicht gefunden")
+                    if s:   # nächster Teil einer Hörspiel-CD
+                        s["teile"] += 1
+                        s["sekunden"] = s.get("sekunden", 0) + secs
+                        name = f"{s['id']}_{s['teile']}"
+                        sid = s["id"]
+                    else:
+                        sid = new_id("a")
+                        s = {"id": sid, "art": "aufnahme", "name": clean_name(q.get("name")), "sekunden": secs}
+                        if q.get("teile") == "1":   # erster Teil, weitere folgen mit zu=<id>
+                            s["teile"] = 1
+                        cfg["quellen"].append(s)
+                        name = f"{sid}_1" if s.get("teile") else sid
+                    with open(os.path.join(REC, name + ".pcm"), "wb") as f:
                         f.write(pcm)
-                    cfg["quellen"].append({"id": sid, "art": "aufnahme", "name": clean_name(q.get("name")),
-                                           "sekunden": round(len(pcm) / 2 / RATE)})
                     save_config()
                 return self.json({"ok": True, "id": sid})
             if u.path == "/api/nachricht":   # vom Gerät: Aufnahme des Kindes (16 kHz mono PCM)
@@ -772,10 +803,12 @@ class Handler(BaseHTTPRequestHandler):
                         if os.path.exists(p):
                             os.remove(p)
                 elif u.path == "/api/quelle/loeschen":
-                    cfg["quellen"] = [s for s in cfg["quellen"] if s["id"] != data["id"]]
-                    p = os.path.join(REC, re.sub(r"[^A-Za-z0-9_-]", "", data["id"]) + ".pcm")
-                    if os.path.exists(p):
-                        os.remove(p)
+                    s = find_source(data["id"])
+                    cfg["quellen"] = [x for x in cfg["quellen"] if x["id"] != data["id"]]
+                    for name in parts(s) if s else []:
+                        p = os.path.join(REC, re.sub(r"[^A-Za-z0-9_-]", "", name) + ".pcm")
+                        if os.path.exists(p):
+                            os.remove(p)
                 elif u.path == "/api/quelle/umbenennen":
                     s = find_source(data["id"])
                     if s:
@@ -820,6 +853,8 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             device["playing"] = src["id"] if act == "play" and src else None
             spotify_on = act == "play" and src and src["art"] == "spotify"
+        if not SPOTIFY:
+            return self.send(200, "ok\n")
         if spotify_on:
             threading.Thread(target=spotify_action, args=("play", src), daemon=True).start()
         elif act in ("pause", "weiter") or (act == "play" and src and src["art"] != "spotify"):
@@ -828,6 +863,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, "ok\n")
 
     def stream(self, sid):
+        path = os.path.join(REC, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".pcm")
+        if sid != "spotify" and not os.path.exists(path):
+            return self.send(404, "nicht gefunden\n")
         # Kein Content-Length: der Strom endet, wenn die Verbindung schließt
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
@@ -846,7 +884,6 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     audio.unsubscribe(q)
             else:
-                path = os.path.join(REC, re.sub(r"[^A-Za-z0-9_-]", "", sid) + ".pcm")
                 with open(path, "rb") as f:
                     while True:
                         chunk = f.read(4096)
@@ -865,7 +902,7 @@ class Handler(BaseHTTPRequestHandler):
                     "quellen": cfg["quellen"],
                     "apps": [{"index": i, "name": n, "an": not (int(cfg.get("apps_aus", 0)) >> i & 1)} for i, n in APPS],
                     "kontakte": cfg["kontakte"], "nachrichten": post_index()[:30], "wecker": cfg["wecker"], "nachtlicht": cfg.get("nachtlicht", False),
-                    "spotify": {"client_id": cfg["spotify"]["client_id"], "verbunden": bool(t.get("refresh_token")),
+                    "spotify": {"aktiv": SPOTIFY, "client_id": cfg["spotify"]["client_id"], "verbunden": bool(t.get("refresh_token")),
                                 "librespot": audio.status, "hinweis": spotify_hint},
                     "uhr": time.strftime("%H:%M")}
 
@@ -903,7 +940,8 @@ def main():
     port = 8770
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
-    audio.start()
+    if SPOTIFY:
+        audio.start()
     srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     # im Heimnetz per Bonjour ankündigen, damit das Gerät das Portal ohne Adresse findet
     bonjour = None

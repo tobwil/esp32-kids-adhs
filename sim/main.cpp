@@ -437,6 +437,19 @@ static int screens(const char* dir) {
     if (acts.size() < 2 || acts.back().find("aktion=play&quelle=sp-x") == std::string::npos) printf("  FEHLER: Radio-Befehle ans Portal fehlen (%zu)\n", acts.size()), nIssues++; }
   sc.tap(int(Radio::PLAY_X), int(Radio::PLAY_Y)); sc.run(0.3f);
   if (gRadio.playing()) printf("  FEHLER: Radio stoppt nicht\n"), nIssues++;
+  {   // mehrteiliger Sender (Hörspiel-CD): Teile nacheinander, „Nächster Teil“, nach dem letzten Ende
+    gRadio.parse("zeit 1792500000\nsperre 0 1170 420\nlaut 70\nschlaf 0\nquelle a5 aufnahme Bibi und Tina Folge 3\nteile a5 3\n");
+    gRadio.select(0); gRadio.play();
+    char path[64]; std::vector<std::string> seen;
+    gRadio.wantedStream(path, sizeof path); seen.push_back(path);
+    gRadio.streamEnded(gRadio.wantedStream(path, sizeof path)); gRadio.wantedStream(path, sizeof path); seen.push_back(path);
+    gRadio.skip(); gRadio.wantedStream(path, sizeof path); seen.push_back(path);
+    sc.run(0.3f); shot("30b_radio_hoerspiel");
+    gRadio.streamEnded(gRadio.wantedStream(path, sizeof path));
+    const bool ok = seen[0] == "/radio/a5_1.pcm" && seen[1] == "/radio/a5_2.pcm" && seen[2] == "/radio/a5_3.pcm" && !gRadio.playing();
+    if (!ok) printf("  FEHLER: Hörspiel-Teile: %s %s %s, spielt %d\n", seen[0].c_str(), seen[1].c_str(), seen[2].c_str(), gRadio.playing()), nIssues++;
+    char a[96]; while (gRadio.takeAction(a, sizeof a)) {}
+  }
   close(); sc.run(0.5f);
   gRadio.parse("zeit 1792500000\nsperre 1 1170 420\nlaut 70\nschlaf 30\nquelle a1 aufnahme Gute-Nacht-Geschichte von Papa\n");
   { PortalSync ps; ps.frame(app, gRadio, "x", 0, sc.ms); }

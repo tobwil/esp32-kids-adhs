@@ -187,9 +187,9 @@
   </section>
 
   <section>
-    <h2>Neue Aufnahme</h2>
+    <h2>Hörspiele, Musik und Aufnahmen</h2>
     <div class="row">
-      <input type="text" id="aname" placeholder="Name, z. B. Gute-Nacht-Geschichte von Papa" maxlength="46">
+      <input type="text" id="aname" placeholder="Name, z. B. Gute-Nacht-Geschichte von Papa oder Bibi & Tina Folge 3" maxlength="46">
     </div>
     <div class="row" style="margin-top:10px">
       <button class="b p" id="recbtn">● Aufnehmen</button>
@@ -198,10 +198,11 @@
       <button class="b" id="recsave" hidden>Speichern</button>
     </div>
     <div class="row" style="margin-top:10px">
-      <label class="b">Datei hochladen …<input type="file" id="datei" accept="audio/*,video/*" hidden></label>
-      <span class="hint">MP3, M4A, Sprachmemo, WAV …</span>
+      <label class="b">Dateien hochladen …<input type="file" id="datei" accept="audio/*,video/*" multiple hidden></label>
+      <span class="hint">MP3, M4A, WAV, Sprachmemo … auch mehrere auf einmal</span>
     </div>
-    <p class="hint">Aufnehmen im Browser geht am Mac unter <code>http://127.0.0.1:8770</code>. Vom Handy aus lieber eine Datei (Sprachmemo) hochladen.</p>
+    <div class="row" style="margin-top:6px"><label><input type="checkbox" id="zusammen" checked> Mehrere Dateien als <b>einen</b> Sender (z. B. alle Titel einer Hörspiel-CD, nach Dateinamen sortiert)</label></div>
+    <p class="hint">Mehrteilige Sender spielen am Gerät die Teile nacheinander, „Nächster Teil“ springt weiter. Aufnehmen im Browser geht am Mac unter <code>http://127.0.0.1:8770</code>, vom Handy aus Dateien hochladen.</p>
     <p class="err" id="aerr"></p>
   </section>
 
@@ -318,8 +319,8 @@ async function refresh() {
     state.quellen.forEach((s, i) => {
       const li = document.createElement("li");
       li.className = "src";
-      li.innerHTML = '<span class="name">' + esc(s.name) + '</span><span class="tag">' + (s.art === "spotify" ? "Spotify" : "Aufnahme" + (s.sekunden ? " · " + Math.round(s.sekunden / 60 * 10) / 10 + " min" : "")) + "</span>"
-        + (s.art === "aufnahme" ? '<audio controls preload="none" src="/vorschau/' + s.id + '.wav"></audio>' : "")
+      li.innerHTML = '<span class="name">' + esc(s.name) + '</span><span class="tag">' + (s.art === "spotify" ? "Spotify" : (s.teile ? "Hörspiel · " + s.teile + " Teile" : "Aufnahme") + (s.sekunden ? " · " + Math.round(s.sekunden / 60 * 10) / 10 + " min" : "")) + "</span>"
+        + (s.art === "aufnahme" ? '<audio controls preload="none" src="/vorschau/' + s.id + (s.teile ? "_1" : "") + '.wav"></audio>' : "")
         + '<button class="b" data-a="hoch"' + (i ? "" : " disabled") + '>↑</button><button class="b" data-a="runter"' + (i < state.quellen.length - 1 ? "" : " disabled") + '>↓</button>'
         + '<button class="b" data-a="name">Umbenennen</button><button class="b" data-a="weg">Entfernen</button>';
       li.querySelectorAll("button").forEach((b) => b.onclick = () => sourceAction(b.dataset.a, s, i));
@@ -329,8 +330,8 @@ async function refresh() {
   $("leer").style.display = state.quellen.length ? "none" : "";
   renderApps();
   renderPost();
-  if (state.cloud && $("spotify")) {   // Cloud: kein Spotify, dafür Gerät verbinden und Abmelden
-    $("spotify").hidden = true;
+  $("spotify").hidden = state.cloud || !(state.spotify && state.spotify.aktiv);   // Spotify ist derzeit aus (portal.py --spotify)
+  if (state.cloud) {   // Cloud: Gerät verbinden und Abmelden
     $("abmelden").hidden = false;
     $("verbinden").hidden = false;
   }
@@ -573,9 +574,9 @@ function recorder(btn, info, player, save, err) {
 }
 const srcRec = recorder($("recbtn"), $("recinfo"), $("recplay"), $("recsave"), $("aerr"));
 const msgRec = recorder($("n_rec"), $("n_info"), $("n_play"), $("n_send"), $("n_err"));
-async function upload(data, typ) {
+async function upload(data, typ, step = "") {
   const name = $("aname").value.trim() || "Aufnahme " + new Date().toLocaleDateString("de-DE");
-  $("aerr").textContent = "Wird umgewandelt …";
+  $("aerr").textContent = "Wird umgewandelt …" + step;
   let pcm;
   try { pcm = await toPcm16(data); } catch (e) { $("aerr").textContent = e.message; return; }
   $("aerr").textContent = "Wird hochgeladen …";
@@ -656,7 +657,35 @@ function renderAlarm() {
   $("w_ton").value = w.ton;
   $("nachtlicht").checked = state.nachtlicht;
 }
-$("datei").onchange = (e) => { const f = e.target.files[0]; if (f) upload(f, (f.name.split(".").pop() || "bin").toLowerCase()); e.target.value = ""; };
+$("datei").onchange = async (e) => {
+  const files = [...e.target.files].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
+  e.target.value = "";
+  if (!files.length) return;
+  if (files.length === 1 || !$("zusammen").checked) {   // jede Datei ein eigener Sender
+    for (const [i, f] of files.entries()) {
+      if (files.length > 1) $("aname").value = f.name.replace(/\.[^.]+$/, "");
+      await upload(f, "", files.length > 1 ? ` (${i + 1} von ${files.length})` : "");
+    }
+    return;
+  }
+  // ein Sender mit mehreren Teilen
+  const name = $("aname").value.trim() || files[0].name.replace(/\.[^.]+$/, "");
+  let id = null;
+  for (const [i, f] of files.entries()) {
+    $("aerr").textContent = `Teil ${i + 1} von ${files.length} wird umgewandelt …`;
+    let pcm;
+    try { pcm = await toPcm16(f); } catch (err) { $("aerr").textContent = f.name + ": " + err.message; return; }
+    $("aerr").textContent = `Teil ${i + 1} von ${files.length} wird hochgeladen …`;
+    const q = id ? "zu=" + encodeURIComponent(id) : "name=" + encodeURIComponent(name) + "&teile=1";
+    const r = await fetch("/api/aufnahme?typ=pcm16&" + q, { method: "POST", body: pcm });
+    const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
+    if (!j.ok) { $("aerr").textContent = j.fehler; return; }
+    id = j.id;
+  }
+  $("aerr").textContent = `„${name}“ mit ${files.length} Teilen ist da.`;
+  $("aname").value = "";
+  refresh();
+};
 
 // ---- Spotify ----
 $("cidsave").onclick = async () => { await post("/api/spotify/client", { client_id: $("cid").value.trim() }); refresh(); };

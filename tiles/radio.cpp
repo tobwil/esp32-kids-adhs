@@ -30,7 +30,7 @@ void Radio::tick(const TileInput& in) {
   else if (hit(x, y, PLUS_X, VOL_Y, VOL_R + 14)) b = B_PLUS;
   else if (std::fabs(y - (SKIP_Y + SKIP_H / 2)) < SKIP_H / 2 + 6 && std::fabs(x - W / 2) < 90) {
     RadioSource s;
-    if (p_.playing() && p_.source(p_.current(), s) && s.spotify) b = B_SKIP;
+    if (p_.playing() && p_.source(p_.current(), s) && (s.spotify || s.tracks > 1)) b = B_SKIP;
   }
   if (b < 0) return;
   pressed_ = b;
@@ -101,7 +101,11 @@ void Radio::draw(Scene& s) {
     if (nl < 0) nl = 0;
     const float y0 = (nl > 1 ? 64 : 84) - (f == &fonts::body ? -6 : 0);
     for (int i = 0; i < nl; i++) s.text(*f, lines[i], W / 2, y0 + i * f->lineH, TXT, 1, Align::Center);
-    s.text(fonts::small, src.spotify ? "Spotify" : "Aufnahme", W / 2, y0 + nl * f->lineH + 2, TXT_DIM, 1, Align::Center);
+    char sub[40];
+    if (src.spotify) snprintf(sub, sizeof sub, "Spotify");
+    else if (src.tracks > 1) snprintf(sub, sizeof sub, "Teil %d von %d", ci >= 0 ? p_.track() : 1, src.tracks);
+    else snprintf(sub, sizeof sub, "Aufnahme");
+    s.text(fonts::small, sub, W / 2, y0 + nl * f->lineH + 2, TXT_DIM, 1, Align::Center);
   }
 
   // Wellen um den Knopf, wenn Ton läuft
@@ -134,10 +138,10 @@ void Radio::draw(Scene& s) {
       s.circle(x, PLAY_Y, ARROW_R, pr2 ? BTN_RIM : BTN);
       tri(s, x + d * 2, PLAY_Y, 11, float(d), TXT);
     }
-  // nächstes Lied (nur Spotify)
-  if (playing && has && src.spotify) {
+  // nächstes Lied (Spotify) bzw. nächster Teil (Hörspiel-CD)
+  if (playing && has && (src.spotify || src.tracks > 1)) {
     s.rrect(W / 2 - 84, SKIP_Y, 168, SKIP_H, SKIP_H / 2, pressT_ > 0 && pressed_ == B_SKIP ? BTN_RIM : BTN);
-    s.text(fonts::small, "Nächstes Lied", W / 2, SKIP_Y + (SKIP_H - fonts::small.lineH) / 2 + 1, TXT, 1, Align::Center);
+    s.text(fonts::small, src.spotify ? "Nächstes Lied" : "Nächster Teil", W / 2, SKIP_Y + (SKIP_H - fonts::small.lineH) / 2 + 1, TXT, 1, Align::Center);
   }
   // Lautstärke: − Balken +
   for (int d = -1; d <= 1; d += 2) {

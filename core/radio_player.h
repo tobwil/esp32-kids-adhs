@@ -8,6 +8,7 @@
 //   laut <max 0..100>
 //   schlaf <minuten, 0 = aus>
 //   quelle <id> <aufnahme|spotify> <name …>
+//   teile <id> <n>              mehrteilige Aufnahme (Hörspiel-CD): Teile /radio/<id>_1.pcm … _n.pcm
 //   hinweis <text …>            (z. B. „Spotify ist nicht verbunden“)
 //   apps <maske>                abgeschaltete Kacheln (Bit je Index)
 //   album <thema> <version>     aktives Kartenthema (eingebaut: „pferde 0“), Version ändert sich bei jeder Bearbeitung
@@ -45,6 +46,7 @@ struct RadioSource {
   char id[32];
   char name[48];
   bool spotify;
+  int tracks;   // mehrteilig (Hörspiel-CD, Album): Teile 1..tracks unter /radio/<id>_<k>.pcm; 0 = eine Datei /radio/<id>.pcm
 };
 
 class RadioPlayer {
@@ -59,7 +61,8 @@ class RadioPlayer {
   void play();
   void stop();
   bool playing() const { return playing_; }
-  void skip();                        // Spotify: nächstes Lied
+  void skip();                        // nächstes Lied (Spotify) bzw. nächster Teil
+  int track() const { return track_; } // aktueller Teil (1-basiert) des gewählten Senders
   // Clip dazwischen (Sprachnachricht): das Radio pausiert und läuft danach weiter
   void playClip(const char* path);
   bool clipPlaying() const { return clip_; }
@@ -123,6 +126,7 @@ class RadioPlayer {
   RadioSource src_[MAX_SOURCES];
   int n_ = 0;
   char cur_[32] = "";
+  int track_ = 1;
   bool playing_ = false;
   int vol_ = 40, maxVol_ = 80;
   float sleepLeft_ = 0, fade_ = 1;

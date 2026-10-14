@@ -33,7 +33,7 @@ Unter Grummel liegt ein **App-Karussell**: eine App groß in der Mitte, links un
 | Kugel ins Loch | Kugeln ins Loch rollen, per Finger als Joystick oder per Neigen. Jede Runde hat ihre Landschaft (Wiese, Strand, Holztisch, Nachthimmel). Ohne Zeitdruck, nach 4 Runden kommt eine Pause |
 | Rätsel | 5 Fragen pro Runde für die 2. Klasse (Rechnen bis 100, Zählen mit Bild, Tiere und Natur, Zeit, Sprache, Körper). Bei Zählbildern hilft Antippen beim Mitzählen. Ab drei gesammelten Pferdekarten kommt eine Bonusfrage „Welches Pferd ist das?“ mit Foto aus dem Album. Bei falscher Antwort zeigt das Gerät freundlich die Lösung und wartet. Ein Stern pro Runde, egal wie viele richtig waren |
 | Sammelalbum | Sammelkarten mit Foto und Infos, eingebaut sind 24 Pferderassen (Typ, Herkunft, Größe, Farben, Wesen, „Wusstest du?“). Eigene Themen (Dinos, Katzen, …) mit eigenen Bildern legen die Eltern im Portal an. Alle 3 Sterne aus den Übungen gibt es eine neue Karte, nie doppelt. Jedes Thema hat einen eigenen Sammelstand |
-| Radio | Sender aus dem Eltern-Portal: eigene Aufnahmen (Gute-Nacht-Geschichten, Hörspiele) und Spotify-Playlists. Großer Abspielknopf, Pfeile wechseln den Sender, − und + die Lautstärke (höchstens so laut, wie die Eltern erlauben). Ein Schlaf-Timer blendet nach der eingestellten Zeit langsam aus. Mit SD-Karte laufen die Aufnahmen auch ohne Netz |
+| Radio | Sender aus dem Eltern-Portal: eigene Aufnahmen, Gute-Nacht-Geschichten, Hörspiele und Musik als MP3 & Co. Mehrteilige Sender (z. B. alle Titel einer Hörspiel-CD) spielen nacheinander, „Nächster Teil“ springt weiter. Großer Abspielknopf, Pfeile wechseln den Sender, − und + die Lautstärke (höchstens so laut, wie die Eltern erlauben). Ein Schlaf-Timer blendet nach der eingestellten Zeit langsam aus. Mit SD-Karte laufen die Aufnahmen auch ohne Netz |
 | Post | Sprachnachrichten nur mit Kontakten, die die Eltern freigeben (höchstens 4). Oben die Nachrichten an das Kind (antippen spielt ab, das Radio pausiert so lange), unten große Knöpfe für Mama, Papa, … Aufnehmen mit einem großen Knopf, höchstens 30 s, dann „Senden“ oder „Nochmal“. Neue Post meldet Grummel auf dem Dashboard |
 
 Außerdem, ohne eigenes Symbol:
@@ -121,17 +121,13 @@ Dann `http://127.0.0.1:8770` am Mac oder `http://<mac-name>.local:8770` vom Hand
 - **Sammelalbum:** aktives Thema wählen, eigene Themen anlegen (Titel, Name auf dem Dashboard, Rätselfrage, Überschriften der Rückseite), Karten mit Bild anlegen und bearbeiten. Bilder werden nicht abgeschnitten (Rand unscharf gefüllt, braucht Pillow aus `tools/.venv`). Das Gerät lädt das aktive Thema im WLAN von selbst in seinen Speicher (`/album`, höchstens 48 Karten), neue Themen beginnen bei null Karten
 - **Sperre** aus, „Nur Radio“ oder nach Zeitplan
 - **Sender** anlegen, umbenennen, sortieren, entfernen; höchste Lautstärke, Schlaf-Timer
+- **Hörspiele und Musik:** mehrere Dateien auf einmal hochladen (MP3, M4A, WAV …), wahlweise als ein Sender mit Teilen (nach Dateinamen sortiert)
 - **Aufnahmen** direkt im Browser aufnehmen (am Mac unter 127.0.0.1, Browser verlangen dafür eine sichere Adresse) oder Dateien hochladen (MP3, M4A, Sprachmemo …). ffmpeg wandelt sie in 16 kHz mono um und gleicht die Lautheit an.
 - **Spotify-Playlists** per Link oder aus „Meine Playlists“
 
 Das Portal meldet sich per Bonjour als `_grummel._tcp` an, das Gerät findet es ohne Adresse. Es fragt alle 2 s nach Sendern, Sperre und Uhrzeit und holt den Ton als 16-Bit-PCM-Strom (`/radio/<id>.pcm`). Ist der Mac aus oder schläft, schläft auch das Radio. `tools/portal/autostart.sh` startet das Portal beim Anmelden am Mac (LaunchAgent, `autostart.sh aus` entfernt ihn).
 
-**Spotify** (braucht Premium) läuft über [librespot](https://github.com/librespot-org/librespot), einen inoffiziellen Spotify-Connect-Empfänger. Er wird nicht von Spotify unterstützt und kann bei Änderungen zeitweise ausfallen. librespot meldet sich als Lautsprecher „Grummel-Radio“, ffmpeg wandelt den Ton um, das Portal reicht ihn ans Gerät weiter. Gestartet und gesteuert wird über die Spotify-Web-API:
-
-1. `brew install librespot`, Portal neu starten
-2. Auf developer.spotify.com eine App anlegen (Web API), Redirect-URI `http://127.0.0.1:8770/spotify/callback`, Client-ID im Portal eintragen
-3. Am Mac im Portal „Mit Spotify verbinden“
-4. In der Spotify-App einmal „Grummel-Radio“ als Lautsprecher wählen
+**Spotify ist derzeit aus.** Der Weg über [librespot](https://github.com/librespot-org/librespot) (inoffizieller Spotify-Connect-Empfänger) ist eingebaut, scheitert aber 2026 bei vielen Konten: Spotify verweigert librespot den Audio-Schlüssel („error audio key 0 1“, [librespot #1649](https://github.com/librespot-org/librespot/issues/1649)). `portal.py --spotify` schaltet es wieder ein (dann `brew install librespot`, einmalig `librespot --enable-oauth --cache tools/portal/daten/librespot --name Grummel-Radio --backend pipe > /dev/null`, Spotify-App mit Client-ID im Portal verbinden).
 
 Alles, was das Portal speichert (Aufnahmen, Einstellungen, Spotify-Anmeldung), liegt in `tools/portal/daten/` und nicht im Repository.
 

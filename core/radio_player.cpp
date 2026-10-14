@@ -50,6 +50,7 @@ void RadioPlayer::select(int i) {
   std::lock_guard<std::mutex> g(mu_);
   if (i < 0 || i >= n_ || !std::strcmp(src_[i].id, cur_)) return;
   snprintf(cur_, sizeof cur_, "%s", src_[i].id);
+  track_ = 1;
   if (playing_) {
     gen_++;
     ring.clear();
@@ -62,7 +63,7 @@ void RadioPlayer::play() {
   std::lock_guard<std::mutex> g(mu_);
   int i = -1;
   for (int k = 0; k < n_; k++) if (!std::strcmp(src_[k].id, cur_)) i = k;
-  if (i < 0) { if (!n_) return; i = 0; snprintf(cur_, sizeof cur_, "%s", src_[0].id); }
+  if (i < 0) { if (!n_) return; i = 0; snprintf(cur_, sizeof cur_, "%s", src_[0].id); track_ = 1; }
   playing_ = true;
   fade_ = 1;
   gen_++;
@@ -84,7 +85,15 @@ void RadioPlayer::stop() {
 
 void RadioPlayer::skip() {
   std::lock_guard<std::mutex> g(mu_);
-  queue("/api/radio?aktion=weiter");
+  for (int i = 0; i < n_; i++) {
+    if (std::strcmp(src_[i].id, cur_)) continue;
+    if (src_[i].spotify) { queue("/api/radio?aktion=weiter"); return; }
+    if (src_[i].tracks > 1 && playing_) {   // nächster Teil, nach dem letzten wieder der erste
+      track_ = track_ < src_[i].tracks ? track_ + 1 : 1;
+      gen_++;
+      ring.clear();
+    }
+  }
 }
 
 void RadioPlayer::playClip(const char* path) {
@@ -210,6 +219,12 @@ void RadioPlayer::parse(const char* text) {
       snprintf(s.id, sizeof s.id, "%s", rest);
       snprintf(s.name, sizeof s.name, "%s", name);
       s.spotify = !std::strcmp(art, "spotify");
+      s.tracks = 0;
+    } else if (!std::strcmp(line, "teile")) {   // teile <id> <n>, nach der zugehörigen quelle-Zeile
+      char id[32];
+      int t = 0;
+      if (std::sscanf(rest, "%31s %d", id, &t) == 2)
+        for (int k = 0; k < n; k++) if (!std::strcmp(fresh[k].id, id)) fresh[k].tracks = t;
     }
   }
   std::memcpy(src_, fresh, sizeof(RadioSource) * n);
@@ -251,8 +266,10 @@ uint32_t RadioPlayer::wantedStream(char* path, int n) {
   if (clip_) { snprintf(path, n, "%s", clipPath_); return gen_; }
   if (playing_ && cur_[0]) {
     bool sp = false;
-    for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) sp = src_[i].spotify;
+    int tracks = 0;
+    for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) { sp = src_[i].spotify; tracks = src_[i].tracks; }
     if (sp) snprintf(path, n, "/radio/spotify.pcm");
+    else if (tracks > 0) snprintf(path, n, "/radio/%s_%d.pcm", cur_, track_ <= tracks ? track_ : 1);
     else snprintf(path, n, "/radio/%s.pcm", cur_);
   }
   return gen_;
@@ -262,7 +279,15 @@ void RadioPlayer::streamEnded(uint32_t gen) {
   {
     std::lock_guard<std::mutex> g(mu_);
     if (gen != gen_) return;
-    if (!clip_) { if (playing_) { playing_ = false; gen_++; } return; }   // Aufnahme ist zu Ende
+    if (!clip_) {
+      if (!playing_) return;
+      int tracks = 0;
+      for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) tracks = src_[i].tracks;
+      if (track_ < tracks) track_++;               // nächster Teil der Hörspiel-CD
+      else { playing_ = false; track_ = 1; }      // Aufnahme ist zu Ende
+      gen_++;
+      return;
+    }
   }
   stopClip();   // Nachricht zu Ende: Radio läuft weiter, falls es lief
 }
