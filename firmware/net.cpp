@@ -21,9 +21,12 @@ static bool sdOk = false;
 static Preferences prefs;
 static volatile bool wifiOn = true, setupOn = false, setupStop = false, setupStart = false;
 static volatile bool reconnect = false;
-static char ssid[33] = "", portalHost[64] = "";   // portalHost: fest eingestellte Adresse (leer = über mDNS suchen)
-static char portalIp[40] = "";                    // gefundene IP des Portals
-static int portalPort = DEFAULT_PORT;
+// portalHost: eingestellte Adresse. Leer = Mac-Portal im Heimnetz über mDNS suchen, „name.local[:port]“ oder IP = Mac-Portal,
+// „https://…“ = Cloud-Portal (mit Gerät-Schlüssel aus dem NVS)
+static char ssid[33] = "", portalHost[96] = "";
+static Endpoint ep;   // gefundenes Portal (ungültig = keins)
+static portMUX_TYPE epMux = portMUX_INITIALIZER_UNLOCKED;
+static bool cloud() { return !strncmp(portalHost, "https://", 8); }
 static uint32_t lastFind = 0;
 
 static DNSServer* dns = nullptr;
@@ -70,8 +73,9 @@ static void handleRoot() {
   h += scanHtml;
   h += "</select><label>…oder Name von Hand</label><input name=m autocomplete=off autocapitalize=off>"
        "<label>Passwort</label><input name=p type=password autocomplete=off>"
-       "<label>Eltern-Portal (leer lassen = automatisch finden)</label><input name=a placeholder='z. B. HomeBook.local' autocapitalize=off value=\"";
+       "<label>Eltern-Portal</label><input name=a placeholder='leer = Mac im Heimnetz, sonst https://…' autocapitalize=off value=\"";
   h += esc(String(portalHost));
+  h += "\"><label>Gerät-Schlüssel (nur für das Cloud-Portal, leer = bisherigen behalten)</label><input name=k type=password autocomplete=off autocapitalize=off value=\"";
   h += "\"><button>Speichern und verbinden</button></form><p><a href=/neu>Netze neu suchen</a></p></main></body></html>";
   web->send(200, "text/html; charset=utf-8", h);
 }
@@ -85,6 +89,9 @@ static void handleSave() {
   String a = web->arg("a");
   a.trim();
   prefs.putString("portal", a);
+  String k = web->arg("k");
+  k.trim();
+  if (k.length()) prefs.putString("schluessel", k);
   snprintf(ssid, sizeof ssid, "%s", s.c_str());
   snprintf(portalHost, sizeof portalHost, "%s", a.c_str());
   String h = FPSTR(PAGE_HEAD);
@@ -122,7 +129,7 @@ static void endSetup() {
 // ---------------- Verbindung ----------------
 
 static void connect() {
-  portalIp[0] = 0;
+  portENTER_CRITICAL(&epMux); ep = Endpoint(); portEXIT_CRITICAL(&epMux);
   if (!wifiOn || !ssid[0]) { WiFi.mode(WIFI_OFF); return; }
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("grummel");
@@ -130,34 +137,45 @@ static void connect() {
   WiFi.begin(ssid, prefs.getString("pw", "").c_str());
 }
 
+static void setEndpoint(const Endpoint& e) { portENTER_CRITICAL(&epMux); ep = e; portEXIT_CRITICAL(&epMux); }
+static Endpoint endpoint() { portENTER_CRITICAL(&epMux); const Endpoint e = ep; portEXIT_CRITICAL(&epMux); return e; }
+
 static void findPortal() {
   lastFind = millis();
+  Endpoint e;
+  if (cloud()) {   // https://host[/…]: der Name wird beim Verbinden aufgelöst
+    snprintf(e.host, sizeof e.host, "%s", portalHost + 8);
+    if (char* sl = strchr(e.host, '/')) *sl = 0;
+    e.port = 443;
+    e.tls = true;
+    snprintf(e.key, sizeof e.key, "%s", prefs.getString("schluessel", "").c_str());
+    setEndpoint(e);
+    return;
+  }
   static bool mdnsUp = false;
   if (!mdnsUp) mdnsUp = MDNS.begin("grummel");
-  portalPort = DEFAULT_PORT;
+  e.port = DEFAULT_PORT;
   if (portalHost[0]) {
     // feste Adresse: „name.local[:port]“ über mDNS, sonst Name oder IP direkt
-    char h[64];
-    snprintf(h, sizeof h, "%s", portalHost);
-    if (char* c = strchr(h, ':')) { portalPort = atoi(c + 1); *c = 0; }
+    char h[96];
+    snprintf(h, sizeof h, "%s", strncmp(portalHost, "http://", 7) ? portalHost : portalHost + 7);
+    if (char* c = strchr(h, ':')) { e.port = atoi(c + 1); *c = 0; }
     const size_t n = strlen(h);
     if (n > 6 && !strcasecmp(h + n - 6, ".local")) {
       h[n - 6] = 0;
       const IPAddress ip = MDNS.queryHost(h, 2000);
-      if (ip != IPAddress(0, 0, 0, 0)) snprintf(portalIp, sizeof portalIp, "%s", ip.toString().c_str());
+      if (ip != IPAddress(0, 0, 0, 0)) snprintf(e.host, sizeof e.host, "%s", ip.toString().c_str());
     } else {
-      snprintf(portalIp, sizeof portalIp, "%s", h);
+      snprintf(e.host, sizeof e.host, "%s", h);
     }
-    return;
+  } else if (MDNS.queryService("grummel", "tcp") > 0) {
+    snprintf(e.host, sizeof e.host, "%s", MDNS.address(0).toString().c_str());
+    e.port = MDNS.port(0);
   }
-  const int n = MDNS.queryService("grummel", "tcp");
-  if (n > 0) {
-    snprintf(portalIp, sizeof portalIp, "%s", MDNS.address(0).toString().c_str());
-    portalPort = MDNS.port(0);
-  }
+  setEndpoint(e);
 }
 
-static const char* streamHost() { return portalIp; }
+
 
 // ---------------- Sammelalbum vom Portal ----------------
 // /stand.txt: „<thema> <version>“ des geladenen Themas. Neues Thema: erst nach /aneu laden, dann gegen /album tauschen.
@@ -194,7 +212,7 @@ static bool toFile(void* ctx, const uint8_t* data, int n) { return static_cast<F
 static bool downloadTo(fs::FS& fs, const char* path, const char* file) {
   File f = fs.open(file, "w");
   if (!f) return false;
-  const bool ok = portalDownload(portalIp, portalPort, path, toFile, &f);
+  const bool ok = portalDownload(endpoint(), path, toFile, &f);
   f.close();
   if (!ok) fs.remove(file);
   return ok;
@@ -396,14 +414,15 @@ static void netTask(void*) {
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
-    if (!portalIp[0] || (!radio->online() && millis() - lastFind > 30000)) findPortal();
-    if (!portalIp[0]) { radio->setOnline(false); vTaskDelay(pdMS_TO_TICKS(3000)); continue; }
-    if (portalPoll(*radio, msgs, portalIp, portalPort)) { syncAlbum(); syncQuiz(); syncOffline(); }
-    vTaskDelay(pdMS_TO_TICKS(radio->playing() ? 1000 : 2000));
+    if (!endpoint().valid() || (!radio->online() && millis() - lastFind > 30000)) findPortal();
+    if (!endpoint().valid()) { radio->setOnline(false); vTaskDelay(pdMS_TO_TICKS(3000)); continue; }
+    if (portalPoll(*radio, msgs, endpoint())) { syncAlbum(); syncQuiz(); syncOffline(); }
+    // Cloud: seltener fragen (kostenloser Rahmen von R2), beim Abspielen öfter (Befehle kommen schneller an)
+    vTaskDelay(pdMS_TO_TICKS(radio->playing() ? (cloud() ? 2000 : 1000) : (cloud() ? 5000 : 2000)));
   }
 }
 
-static void streamTask(void*) { portalStreamLoop(*radio, streamHost, portalPort, &sdFiles); }
+static void streamTask(void*) { portalStreamLoop(*radio, endpoint, &sdFiles); }
 
 void netBegin(RadioPlayer* r, Messages* m, bool sd) {
   radio = r;
@@ -414,13 +433,22 @@ void netBegin(RadioPlayer* r, Messages* m, bool sd) {
   wifiOn = prefs.getBool("an", true);
   snprintf(ssid, sizeof ssid, "%s", prefs.getString("ssid", "").c_str());
   snprintf(portalHost, sizeof portalHost, "%s", prefs.getString("portal", "").c_str());
-  xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(streamTask, "radio", 6144, nullptr, 2, nullptr, 0);
+  // TLS braucht Stapel: Abfrage 16 KB, Tonstrom 12 KB
+  xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(streamTask, "radio", 12288, nullptr, 2, nullptr, 0);
+}
+
+void netSetPortal(const char* addr, const char* key) {
+  snprintf(portalHost, sizeof portalHost, "%s", addr);
+  prefs.putString("portal", portalHost);
+  if (key && *key) prefs.putString("schluessel", key);
+  lastFind = 0;
+  setEndpoint(Endpoint());   // beim nächsten Durchlauf neu suchen
 }
 
 void netStatus(char* out, int n) {
   snprintf(out, n, "wlan %s, netz „%s“, ip %s, portal %s:%d %s", !wifiOn ? "aus" : setupOn ? "einrichten" : WiFi.status() == WL_CONNECTED ? "verbunden" : "getrennt",
-           ssid, WiFi.localIP().toString().c_str(), portalIp[0] ? portalIp : "-", portalPort, radio && radio->online() ? "erreichbar" : "nicht erreichbar");
+           ssid, WiFi.localIP().toString().c_str(), endpoint().valid() ? endpoint().host : "-", endpoint().port, radio && radio->online() ? "erreichbar" : "nicht erreichbar");
 }
 
 // ---------------- Gerätemenü in den Einstellungen ----------------
@@ -449,7 +477,7 @@ struct NetMenu : SystemMenu {
         break;
       case 1: snprintf(b, n, ssid[0] ? "WLAN neu einrichten" : "WLAN einrichten"); break;
       case 2: snprintf(b, n, "WLAN: %s", wifiOn ? "an" : "aus"); break;
-      case 3: snprintf(b, n, "Eltern-Portal: %s", radio && radio->online() ? "verbunden" : "nicht gefunden"); break;
+      case 3: snprintf(b, n, "Eltern-Portal: %s%s", radio && radio->online() ? "verbunden" : "nicht gefunden", cloud() ? " (Cloud)" : ""); break;
       default:
         if (WiFi.status() == WL_CONNECTED) snprintf(b, n, "Adresse: %s", WiFi.localIP().toString().c_str());
         else snprintf(b, n, " ");

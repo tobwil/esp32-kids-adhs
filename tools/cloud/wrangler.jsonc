@@ -1,0 +1,12 @@
+// Eltern-Portal in der Cloud (Cloudflare Worker). Alles liegt im R2-Bucket, die Oberfläche ist dieselbe wie beim Mac-Portal.
+// Geheimnisse (nicht hier, sondern mit „npx wrangler secret put …“): ELTERN_PASSWORT, GERAET_SCHLUESSEL
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "grummel-portal",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  // Speicher in der EU (DSGVO): Aufnahmen und Sprachnachrichten bleiben dort
+  "r2_buckets": [{ "binding": "DATEN", "bucket_name": "grummel-portal", "jurisdiction": "eu" }],
+  "vars": { "ZEITZONE": "Europe/Berlin" },
+  "observability": { "enabled": true }
+}

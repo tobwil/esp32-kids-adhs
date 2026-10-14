@@ -12,6 +12,8 @@
 void netBegin(dk::RadioPlayer* radio, dk::Messages* msgs, bool sd);
 dk::SystemMenu* netMenu();
 void netStatus(char* out, int n);   // für den seriellen Befehl „status“
+// Portal einstellen (serieller Befehl „portal <adresse> [schlüssel]“): leer = Mac im Heimnetz, https://… = Cloud
+void netSetPortal(const char* addr, const char* key);
 // Sammelalbum: true = ein Thema aus dem Portal liegt in /album (sonst die eingebauten Pferde)
 bool netAlbumTheme();
 bool netTakeAlbumReload();          // neues Thema geladen: einmal true

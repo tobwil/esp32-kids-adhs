@@ -617,7 +617,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/aufnahme":
                 raw = self.body()
-                pcm = convert(raw, "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
+                # der Browser wandelt inzwischen selbst um (16 kHz mono PCM), sonst ffmpeg
+                pcm = raw if q.get("typ") == "pcm16" else convert(raw, "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
                 with lock:
                     sid = new_id("a")
                     with open(os.path.join(REC, sid + ".pcm"), "wb") as f:
@@ -632,7 +633,8 @@ class Handler(BaseHTTPRequestHandler):
                     post_add("vom_kind", re.sub(r"[^a-z0-9]", "", q.get("an", ""))[:8], pcm)
                 return self.send(200, "ok\n")
             if u.path == "/api/nachricht/senden":   # von den Eltern ans Kind
-                pcm = convert(self.body(), "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
+                raw = self.body()
+                pcm = raw if q.get("typ") == "pcm16" else convert(raw, "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
                 with lock:
                     kid = q.get("von", "")
                     if not any(k["id"] == kid for k in cfg["kontakte"]):
@@ -641,7 +643,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"ok": True, "id": mid})
             if u.path == "/api/album/bild":
                 raw = self.body()
-                jpg, _ = card_image(raw)
+                jpg = raw if q.get("typ") == "karte" else card_image(raw)[0]   # „karte“: im Browser schon auf 328×196 gebracht
                 with lock:
                     a = album_load(q.get("album", ""))
                     kid = int(q.get("karte", 0))

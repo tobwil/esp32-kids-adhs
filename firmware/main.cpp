@@ -19,6 +19,7 @@
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   wisch X0 Y0 X1 Y1  Wischen von X0, Y0 nach X1, Y1
 //   boot           BOOT-Taste drücken (Einstellungen auf/zu)
+//   portal [A [S]] Eltern-Portal: leer = Mac im Heimnetz (mDNS), https://… = Cloud mit Gerät-Schlüssel S
 //   beruehrung     jede Berührung mit Position ausgeben ein/aus (zum Prüfen der Touch-Koordinaten)
 //   bench          Rasterzeit je Form messen
 //   prof           Rechenzeit je Formtyp im Zwei-Sekunden-Protokoll ein/aus
@@ -444,6 +445,11 @@ static void pollSerial() {
         for (int k = 0; k <= 8; k++) fakeTouch[fakeTouchN++] = {true, int16_t(x0 + (x1 - x0) * k / 8), int16_t(y0 + (y1 - y0) * k / 8), t0 + 33u * k};
         fakeTouch[fakeTouchN++] = {false, int16_t(x1), int16_t(y1), t0 + 33u * 9};
       }
+    } else if (!strncmp(line, "portal", 6)) {   // portal [adresse [schlüssel]]: Eltern-Portal einstellen
+      char addr[96] = "", key[64] = "";
+      sscanf(line + 6, "%95s %63s", addr, key);
+      netSetPortal(addr, key);
+      Serial.printf("portal %s%s\n", addr[0] ? addr : "(Mac im Heimnetz)", key[0] ? " mit Schlüssel" : "");
     } else if (!strcmp(line, "boot")) {   // BOOT-Taste drücken (Einstellungen auf/zu)
       fakeBoot = 3;
     } else if (!strcmp(line, "beruehrung")) {

@@ -165,9 +165,23 @@ struct FileImages : ImageStore {
   Image thumb(int id) override { return get(thumbs, id, "_t.rgb", THUMB_W, THUMB_H); }
 };
 
+// Portal-Adresse: „host[:port]“ (Mac-Portal 8770, „wrangler dev“ 8787), Schlüssel fürs Cloud-Portal aus DK_SCHLUESSEL
+static Endpoint gEp;
+static Endpoint makeEndpoint(const char* addr) {
+  Endpoint e;
+  const char* a = addr && *addr ? addr : "127.0.0.1";
+  if (!std::strncmp(a, "https://", 8)) { a += 8; e.tls = true; e.port = 443; }
+  else if (!std::strncmp(a, "http://", 7)) a += 7;
+  snprintf(e.host, sizeof e.host, "%s", a);
+  if (char* c = std::strchr(e.host, ':')) { e.port = std::atoi(c + 1); *c = 0; }
+  if (char* sl = std::strchr(e.host, '/')) *sl = 0;
+  if (const char* k = getenv("DK_SCHLUESSEL")) snprintf(e.key, sizeof e.key, "%s", k);
+  return e;
+}
+
 // Kartenbilder eines Portal-Themas: RGB565-Rohdaten vom Portal (der Simulator dekodiert kein JPEG)
 struct PortalImages : ImageStore {
-  std::string host = "127.0.0.1";
+  Endpoint ep;
   std::map<int, std::vector<uint16_t>> cards, thumbs;
   static bool sink(void* ctx, const uint8_t* d, int n) { auto* v = static_cast<std::vector<uint8_t>*>(ctx); v->insert(v->end(), d, d + n); return true; }
   Image get(std::map<int, std::vector<uint16_t>>& m, int id, bool thumb) {
@@ -178,7 +192,7 @@ struct PortalImages : ImageStore {
       snprintf(path, sizeof path, "/album/bild/%d%s.rgb", id, thumb ? "_t" : "");
       const size_t want = size_t(thumb ? THUMB_W * THUMB_H : CARD_W * CARD_H) * 2;
       std::vector<uint16_t> px;
-      if (portalDownload(host.c_str(), 8770, path, sink, &raw) && raw.size() == want) { px.resize(want / 2); std::memcpy(px.data(), raw.data(), want); }
+      if (portalDownload(ep, path, sink, &raw) && raw.size() == want) { px.resize(want / 2); std::memcpy(px.data(), raw.data(), want); }
       it = m.emplace(id, std::move(px)).first;
     }
     if (it->second.empty()) return {};
@@ -535,11 +549,12 @@ static int bench() {
 static int portalTest(const char* host) {
   gMsgs.setBuffer(gRecBuf.data(), int(gRecBuf.size()));
   gRadio.setMessages(&gMsgs);
-  if (!portalPoll(gRadio, &gMsgs, host, 8770)) { printf("Portal %s nicht erreichbar\n", host); return 1; }
+  gEp = makeEndpoint(host);
+  if (!portalPoll(gRadio, &gMsgs, gEp)) { printf("Portal %s nicht erreichbar\n", host); return 1; }
   const int n = gRadio.count();
   printf("Portal erreichbar, %d Sender\n", n);
   for (int i = 0; i < n; i++) { RadioSource s; gRadio.source(i, s); printf("  %s  %s  %s\n", s.id, s.spotify ? "spotify" : "aufnahme", s.name); }
-  std::thread([] { portalStreamLoop(gRadio, [] { return "127.0.0.1"; }, 8770); }).detach();
+  std::thread([] { portalStreamLoop(gRadio, [] { return gEp; }); }).detach();
   int16_t buf[1600];
   double sum = 0;
   long cnt = 0;
@@ -553,14 +568,14 @@ static int portalTest(const char* host) {
       for (int16_t v : buf) { sum += double(v) * v; cnt++; }
     }
   }
-  portalPoll(gRadio, &gMsgs, host, 8770);   // schickt auch die Befehle (play) ans Portal
+  portalPoll(gRadio, &gMsgs, gEp);   // schickt auch die Befehle (play) ans Portal
   printf("Album-Thema: %s (Version %08x)\n", gRadio.albumTheme, unsigned(gRadio.albumVersion));
   printf("Wecker %s %d:%02d Tage %02x Ton %s, Nachtlicht %s, %d Dateien für die SD-Karte\n", gRadio.alarmOn ? "an" : "aus", gRadio.alarmMin / 60, gRadio.alarmMin % 60,
          gRadio.alarmDays, gRadio.alarmTone, gRadio.nightLight ? "an" : "aus", gRadio.nFiles);
   printf("Post: %d Nachrichten (%d neu), %d Kontakte\n", gMsgs.count(), gMsgs.unheard(), gMsgs.contacts());
   {   // Rätsel-Fragen aus dem Portal
     std::vector<uint8_t> raw;
-    if (gRadio.quizVersion && portalDownload(host, 8770, "/fragen.txt", PortalImages::sink, &raw)) {
+    if (gRadio.quizVersion && portalDownload(gEp, "/fragen.txt", PortalImages::sink, &raw)) {
       raw.push_back(0);
       QuizPack qp;
       qp.load(reinterpret_cast<char*>(raw.data()));
@@ -587,16 +602,16 @@ static int portalTest(const char* host) {
     gMsgs.feed(b, 24000);
     gMsgs.stopRecording();
     gMsgs.send(con.id);
-    portalPoll(gRadio, &gMsgs, host, 8770);
+    portalPoll(gRadio, &gMsgs, gEp);
     printf("  Antwort an %s %s\n", con.name, gMsgs.sending() ? "NICHT gesendet" : "gesendet");
   }
   if (std::strcmp(gRadio.albumTheme, "pferde") != 0) {
     std::vector<uint8_t> raw;
-    if (portalDownload(host, 8770, "/album/karten.txt", PortalImages::sink, &raw)) {
+    if (portalDownload(gEp, "/album/karten.txt", PortalImages::sink, &raw)) {
       raw.push_back(0);
       Synth synth; FileStore store("");
       Album a(synth, store, 1);
-      PortalImages pi; pi.host = host;
+      PortalImages pi; pi.ep = gEp;
       a.load(reinterpret_cast<char*>(raw.data()));
       printf("  %s: %d Karten, Dashboard „%s“, Frage „%s“\n", a.title(), a.count(), a.shortName(), a.question());
       int withImg = 0;
@@ -658,12 +673,12 @@ int main(int argc, char** argv) {
   app.begin(SDL_GetTicks());
 
   // Eltern-Portal (tools/portal): Adresse aus DK_PORTAL, sonst der Mac selbst
-  static std::string portalHost = getenv("DK_PORTAL") ? getenv("DK_PORTAL") : "127.0.0.1";
-  std::thread([] { for (;;) { portalPoll(gRadio, &gMsgs, portalHost.c_str(), 8770); std::this_thread::sleep_for(std::chrono::seconds(2)); } }).detach();
-  std::thread([] { portalStreamLoop(gRadio, [] { return portalHost.c_str(); }, 8770); }).detach();
+  gEp = makeEndpoint(getenv("DK_PORTAL"));
+  std::thread([] { for (;;) { portalPoll(gRadio, &gMsgs, gEp); std::this_thread::sleep_for(std::chrono::seconds(2)); } }).detach();
+  std::thread([] { portalStreamLoop(gRadio, [] { return gEp; }); }).detach();
   PortalSync sync;
   static PortalImages portalImages;
-  portalImages.host = portalHost;
+  portalImages.ep = gEp;
   static std::mutex albumMu;
   static std::string albumText, albumKey;   // vom Netz-Thread geholt, im Hauptthread geladen
   static bool albumNew = false;
@@ -675,7 +690,7 @@ int main(int argc, char** argv) {
       std::this_thread::sleep_for(std::chrono::seconds(2));
       static uint32_t quizHave = 0;
       std::vector<uint8_t> qraw;
-      if (gRadio.quizVersion && gRadio.quizVersion != quizHave && portalDownload(portalHost.c_str(), 8770, "/fragen.txt", PortalImages::sink, &qraw)) {
+      if (gRadio.quizVersion && gRadio.quizVersion != quizHave && portalDownload(gEp, "/fragen.txt", PortalImages::sink, &qraw)) {
         qraw.push_back(0);
         std::lock_guard<std::mutex> g(albumMu);
         quizText = reinterpret_cast<char*>(qraw.data());
@@ -688,7 +703,7 @@ int main(int argc, char** argv) {
       if (have == key) continue;
       std::vector<uint8_t> raw;
       const bool builtin = !std::strcmp(gRadio.albumTheme, "pferde");
-      if (!builtin && !portalDownload(portalHost.c_str(), 8770, "/album/karten.txt", PortalImages::sink, &raw)) continue;
+      if (!builtin && !portalDownload(gEp, "/album/karten.txt", PortalImages::sink, &raw)) continue;
       raw.push_back(0);
       std::lock_guard<std::mutex> g(albumMu);
       albumText = builtin ? std::string(ALBUM_BUILTIN) : std::string(reinterpret_cast<char*>(raw.data()));

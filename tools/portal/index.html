@@ -58,7 +58,7 @@
 </head>
 <body>
 <main>
-  <h1>Grummel – Eltern-Portal</h1>
+  <h1>Grummel – Eltern-Portal <a href="/abmelden" id="abmelden" class="b" hidden style="font-size:14px;vertical-align:middle">Abmelden</a></h1>
   <p class="sub" id="geraet">Lade …</p>
 
   <section>
@@ -204,6 +204,17 @@
     <p class="err" id="aerr"></p>
   </section>
 
+  <section id="verbinden" hidden>
+    <h2>Gerät verbinden</h2>
+    <p class="hint" style="margin-top:0">Einmalig am Gerät: 3 s halten → „WLAN einrichten“ → am Handy mit „Grummel-Setup“ verbinden. Auf der Seite dort zusätzlich diese beiden Angaben eintragen (kopieren und einfügen):</p>
+    <div class="grid">
+      <label>Eltern-Portal <input type="text" id="v_adresse" readonly></label>
+      <label>Gerät-Schlüssel <input type="password" id="v_schluessel" readonly></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="b" id="v_zeigen">Schlüssel zeigen</button><button class="b" id="v_kopieren">Schlüssel kopieren</button></div>
+    <p class="hint">Mit dem Schlüssel meldet sich das Gerät beim Portal an. Bitte nicht weitergeben.</p>
+  </section>
+
   <section id="spotify">
     <h2>Spotify</h2>
     <p id="spstatus" class="hint"></p>
@@ -234,6 +245,46 @@ const $ = (id) => document.getElementById(id);
 let state = null;
 const hm = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
 const mins = (v) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
+
+// Cloud-Portal: abgelaufene Anmeldung führt zur Anmeldeseite
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...a) => { const r = await _fetch(...a); if (r.status === 401) location.href = "/anmelden"; return r; };
+
+// ---- Umwandeln im Browser (Cloud und Mac): Ton → 16 kHz mono PCM, Bild → Karten-JPEG 328 × 196 ----
+async function toPcm16(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  let audio;
+  try { audio = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+  catch { throw new Error("Diese Datei kann der Browser nicht lesen (MP3, M4A, WAV, Sprachmemo gehen)"); }
+  finally { ctx.close(); }
+  if (audio.duration > 50 * 60) throw new Error("Höchstens 50 Minuten am Stück (bitte teilen)");
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(audio.duration * 16000)), 16000);
+  const src = off.createBufferSource();
+  src.buffer = audio; src.connect(off.destination); src.start();
+  const out = (await off.startRendering()).getChannelData(0);
+  let sum = 0, peak = 0;   // Lautheit angleichen (etwa −18 dBFS), Spitzen begrenzen
+  for (let i = 0; i < out.length; i++) { const v = out[i]; sum += v * v; if (Math.abs(v) > peak) peak = Math.abs(v); }
+  let g = 0.125 / (Math.sqrt(sum / out.length) || 1e-6);
+  if (peak * g > 0.95) g = 0.95 / (peak || 1);
+  const pcm = new Int16Array(out.length);
+  for (let i = 0; i < out.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, Math.round(out[i] * g * 32767)));
+  return new Blob([pcm.buffer], { type: "application/octet-stream" });
+}
+async function toCard(file) {
+  const img = await createImageBitmap(file);   // dreht Handyfotos richtig (EXIF)
+  const W = 328, H = 196, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const cover = Math.max(W / img.width, H / img.height), fit = Math.min(W / img.width, H / img.height);
+  // Rand: unscharfe, dunklere Fassung desselben Bildes, darauf das ganze Bild (nichts wird abgeschnitten)
+  if ("filter" in g) g.filter = "blur(14px) brightness(0.55)";
+  g.drawImage(img, (W - img.width * cover) / 2, (H - img.height * cover) * 0.4, img.width * cover, img.height * cover);
+  g.filter = "none";
+  if (!("filter" in g)) { g.fillStyle = "rgba(0,0,0,0.45)"; g.fillRect(0, 0, W, H); }
+  const w = img.width * fit, h = img.height * fit;
+  g.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  return new Promise((r) => c.toBlob(r, "image/jpeg", 0.84));
+}
 
 async function post(path, data) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data || {}) });
@@ -277,6 +328,11 @@ async function refresh() {
   $("leer").style.display = state.quellen.length ? "none" : "";
   renderApps();
   renderPost();
+  if (state.cloud && $("spotify")) {   // Cloud: kein Spotify, dafür Gerät verbinden und Abmelden
+    $("spotify").hidden = true;
+    $("abmelden").hidden = false;
+    $("verbinden").hidden = false;
+  }
   renderAlarm();
 
   const sp = state.spotify;
@@ -390,7 +446,7 @@ $("k_save").onclick = async () => {
     const file = $("k_bild").files[0];
     if (file) {
       $("k_err").textContent = "Bild wird vorbereitet …";
-      const r = await fetch("/api/album/bild?album=" + encodeURIComponent(offen) + "&karte=" + j.id, { method: "POST", body: file });
+      const r = await fetch("/api/album/bild?album=" + encodeURIComponent(offen) + "&karte=" + j.id + "&typ=karte", { method: "POST", body: await toCard(file) });
       const jj = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
       if (!jj.ok) throw new Error(jj.fehler);
     }
@@ -519,7 +575,10 @@ const msgRec = recorder($("n_rec"), $("n_info"), $("n_play"), $("n_send"), $("n_
 async function upload(data, typ) {
   const name = $("aname").value.trim() || "Aufnahme " + new Date().toLocaleDateString("de-DE");
   $("aerr").textContent = "Wird umgewandelt …";
-  const r = await fetch("/api/aufnahme?name=" + encodeURIComponent(name) + "&typ=" + encodeURIComponent(typ), { method: "POST", body: data });
+  let pcm;
+  try { pcm = await toPcm16(data); } catch (e) { $("aerr").textContent = e.message; return; }
+  $("aerr").textContent = "Wird hochgeladen …";
+  const r = await fetch("/api/aufnahme?name=" + encodeURIComponent(name) + "&typ=pcm16", { method: "POST", body: pcm });
   const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
   $("aerr").textContent = j.ok ? "" : j.fehler;
   if (j.ok) { $("aname").value = ""; srcRec.reset(); }
@@ -530,7 +589,9 @@ $("recsave").onclick = () => upload(srcRec.blob, srcRec.type());
 // ---- Post ----
 async function sendMsg(data, typ) {
   $("n_err").textContent = "Wird umgewandelt …";
-  const r = await fetch("/api/nachricht/senden?von=" + encodeURIComponent($("n_von").value) + "&typ=" + encodeURIComponent(typ), { method: "POST", body: data });
+  let pcm;
+  try { pcm = await toPcm16(data); } catch (e) { $("n_err").textContent = e.message; return; }
+  const r = await fetch("/api/nachricht/senden?von=" + encodeURIComponent($("n_von").value) + "&typ=pcm16", { method: "POST", body: pcm });
   const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
   $("n_err").textContent = j.ok ? "Gesendet. Grummel sagt auf dem Gerät Bescheid." : j.fehler;
   if (j.ok) msgRec.reset();
@@ -619,6 +680,17 @@ $("meine").onclick = async () => {
   if (!list.length) ul.innerHTML = '<li class="hint">Keine Playlists gefunden.</li>';
 };
 
+$("v_zeigen").onclick = async () => {
+  const j = await (await fetch("/api/geraet-schluessel")).json();
+  $("v_adresse").value = j.adresse; $("v_schluessel").value = j.schluessel;
+  $("v_schluessel").type = $("v_schluessel").type === "password" ? "text" : "password";
+};
+$("v_kopieren").onclick = async () => {
+  const j = await (await fetch("/api/geraet-schluessel")).json();
+  $("v_adresse").value = j.adresse;
+  await navigator.clipboard.writeText(j.schluessel);
+  $("v_kopieren").textContent = "Kopiert";
+};
 refresh();
 loadAlben();
 loadFragen();

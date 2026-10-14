@@ -1,14 +1,8 @@
 #include "portal_net.h"
 
-#include <fcntl.h>
-#include <netdb.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 
@@ -16,143 +10,154 @@ namespace dk {
 
 static void sleepMs(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
-// Verbinden mit Zeitlimit; -1 bei Fehler
-static int connectTo(const char* host, int port, int timeoutMs) {
-  if (!host || !host[0]) return -1;
-  addrinfo hints{}, *res = nullptr;
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_STREAM;
-  char ps[8];
-  snprintf(ps, sizeof ps, "%d", port);
-  if (getaddrinfo(host, ps, &hints, &res) != 0 || !res) return -1;
-  const int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-  if (fd < 0) { freeaddrinfo(res); return -1; }
-  const int fl = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-  int rc = connect(fd, res->ai_addr, res->ai_addrlen);
-  freeaddrinfo(res);
-  if (rc != 0) {
-    fd_set w;
-    FD_ZERO(&w);
-    FD_SET(fd, &w);
-    timeval tv{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
-    int err = 0;
-    socklen_t len = sizeof err;
-    if (select(fd + 1, nullptr, &w, nullptr, &tv) != 1 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0 || err) { close(fd); return -1; }
+// ---------------- HTTP-Antwort lesen (auch Chunked) ----------------
+
+struct Body {
+  NetConn* c = nullptr;
+  bool chunked = false;
+  long left = -1;        // Chunked: Bytes im aktuellen Stück (-1 = Kopf des ersten Stücks lesen)
+  bool done = false;
+  uint8_t pre[1024];     // nach den Kopfzeilen schon gelesene Bytes
+  int preN = 0, preI = 0;
+};
+
+static int rawRead(Body& b, uint8_t* buf, int n, int timeoutMs) {
+  if (b.preI < b.preN) {
+    const int k = b.preN - b.preI < n ? b.preN - b.preI : n;
+    std::memcpy(buf, b.pre + b.preI, k);
+    b.preI += k;
+    return k;
   }
-  fcntl(fd, F_SETFL, fl);
-  timeval rt{1, 0};
-  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof rt);
-  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof rt);
-  return fd;
+  return netRead(b.c, buf, n, timeoutMs);
 }
 
-// GET senden und Kopfzeilen überspringen; gibt den Socket zurück (Körper folgt), -1 bei Fehler.
-// Bereits mitgelesene Bytes des Körpers landen in extra/nExtra.
-static int httpGet(const char* host, int port, const char* path, char* extra, int& nExtra) {
-  nExtra = 0;
-  const int fd = connectTo(host, port, 1500);
-  if (fd < 0) return -1;
-  char req[256];
-  const int n = snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
-  if (send(fd, req, n, 0) != n) { close(fd); return -1; }
-  char buf[1024];
+static bool rawByte(Body& b, uint8_t& v, int timeoutMs) {
+  for (int tries = 0; tries < 10; tries++) {
+    const int r = rawRead(b, &v, 1, timeoutMs);
+    if (r == 1) return true;
+    if (r != -2) return false;
+  }
+  return false;
+}
+
+// >0 Bytes, 0 = Ende, -1 = Fehler, -2 = Zeitlimit (Strom pausiert)
+static int bodyRead(Body& b, uint8_t* buf, int n, int timeoutMs) {
+  if (b.done) return 0;
+  if (!b.chunked) return rawRead(b, buf, n, timeoutMs);
+  if (b.left <= 0) {
+    uint8_t c = 0;
+    if (b.left == 0) { rawByte(b, c, timeoutMs); rawByte(b, c, timeoutMs); }   // CRLF nach dem Stück
+    char line[20];
+    int k = 0;
+    while (k < int(sizeof line) - 1) {
+      if (!rawByte(b, c, timeoutMs)) return -1;
+      if (c == '\n') break;
+      if (c != '\r') line[k++] = char(c);
+    }
+    line[k] = 0;
+    b.left = std::strtol(line, nullptr, 16);
+    if (b.left <= 0) { b.done = true; return 0; }
+  }
+  const int r = rawRead(b, buf, n < b.left ? n : int(b.left), timeoutMs);
+  if (r > 0) b.left -= r;
+  return r;
+}
+
+// Anfrage senden und Kopfzeilen lesen; false bei Fehler oder Status ≠ 200
+static bool request(const Endpoint& ep, const char* method, const char* path, const uint8_t* data, int len, Body& b) {
+  b.c = nullptr; b.chunked = false; b.left = -1; b.done = false; b.preN = b.preI = 0;
+  if (!ep.valid()) return false;
+  b.c = netOpen(ep, 4000);
+  if (!b.c) return false;
+  char req[400];
+  int n = snprintf(req, sizeof req, "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n", method, path, ep.host);
+  if (ep.key[0]) n += snprintf(req + n, sizeof req - n, "Authorization: Bearer %s\r\n", ep.key);
+  if (data) n += snprintf(req + n, sizeof req - n, "Content-Type: application/octet-stream\r\nContent-Length: %d\r\n", len);
+  n += snprintf(req + n, sizeof req - n, "\r\n");
+  bool ok = netWrite(b.c, req, n) == n;
+  for (int off = 0; ok && data && off < len;) {
+    const int w = netWrite(b.c, data + off, len - off < 4096 ? len - off : 4096);
+    if (w <= 0) ok = false;
+    else off += w;
+  }
+  // Kopfzeilen (nach einem POST darf das Portal erst rechnen)
+  char head[1024];
   int have = 0;
-  for (int tries = 0; tries < 6; tries++) {
-    const int r = int(recv(fd, buf + have, sizeof buf - 1 - have, 0));
+  char* end = nullptr;
+  for (int tries = 0; ok && !end && tries < (data ? 20 : 8); tries++) {
+    const int r = netRead(b.c, head + have, int(sizeof head) - 1 - have, 1000);
+    if (r == -2) continue;
     if (r <= 0) break;
     have += r;
-    buf[have] = 0;
-    char* end = std::strstr(buf, "\r\n\r\n");
-    if (end) {
-      if (std::strncmp(buf + 9, "200", 3) != 0) { close(fd); return -1; }   // „HTTP/1.x 200“
-      end += 4;
-      nExtra = int(buf + have - end);
-      std::memcpy(extra, end, nExtra);
-      return fd;
-    }
-    if (have >= int(sizeof buf) - 1) break;
+    head[have] = 0;
+    end = std::strstr(head, "\r\n\r\n");
+    if (have >= int(sizeof head) - 1) break;
   }
-  close(fd);
-  return -1;
+  if (!ok || !end || have < 12 || std::strncmp(head + 9, "200", 3) != 0) { netClose(b.c); b.c = nullptr; return false; }
+  b.preN = int(head + have - (end + 4));
+  std::memcpy(b.pre, end + 4, b.preN);
+  *end = 0;
+  for (char* p = head; *p; p++) *p = char(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);   // Kopfzeilen ohne Groß/klein
+  b.chunked = std::strstr(head, "transfer-encoding: chunked") != nullptr;
+  return true;
 }
 
-static bool fetch(const char* host, int port, const char* path, char* out, int cap) {
+static bool fetch(const Endpoint& ep, const char* path, char* out, int cap) {
+  Body b;
+  if (!request(ep, "GET", path, nullptr, 0, b)) return false;
   int n = 0;
-  const int fd = httpGet(host, port, path, out, n);
-  if (fd < 0) return false;
   for (;;) {
     if (n >= cap - 1) break;
-    const int r = int(recv(fd, out + n, cap - 1 - n, 0));
+    const int r = bodyRead(b, reinterpret_cast<uint8_t*>(out + n), cap - 1 - n, 3000);
     if (r <= 0) break;
     n += r;
   }
   out[n] = 0;
-  close(fd);
+  netClose(b.c);
   return true;
 }
 
-bool portalDownload(const char* host, int port, const char* path, bool (*sink)(void*, const uint8_t*, int), void* ctx) {
-  char first[1024];
-  int n = 0;
-  const int fd = httpGet(host, port, path, first, n);
-  if (fd < 0) return false;
-  bool ok = n == 0 || sink(ctx, reinterpret_cast<uint8_t*>(first), n);
+bool portalDownload(const Endpoint& ep, const char* path, bool (*sink)(void*, const uint8_t*, int), void* ctx) {
+  Body b;
+  if (!request(ep, "GET", path, nullptr, 0, b)) return false;
   uint8_t buf[1024];
-  while (ok) {
-    const int r = int(recv(fd, buf, sizeof buf, 0));
+  bool ok = true;
+  for (;;) {
+    const int r = bodyRead(b, buf, sizeof buf, 5000);
     if (r == 0) break;
     if (r < 0) { ok = false; break; }   // Zeitlimit oder Fehler: unvollständig
-    ok = sink(ctx, buf, r);
+    if (!sink(ctx, buf, r)) { ok = false; break; }
   }
-  close(fd);
+  netClose(b.c);
   return ok;
 }
 
-bool portalPost(const char* host, int port, const char* path, const uint8_t* data, int len) {
-  const int fd = connectTo(host, port, 1500);
-  if (fd < 0) return false;
-  timeval st{5, 0};
-  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof st);
-  char req[320];
-  const int n = snprintf(req, sizeof req, "POST %s HTTP/1.0\r\nHost: %s\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
-                         path, host, len);
-  bool ok = send(fd, req, n, 0) == n;
-  for (int off = 0; ok && off < len;) {
-    const int r = int(send(fd, data + off, len - off < 4096 ? len - off : 4096, 0));
-    if (r <= 0) ok = false;
-    else off += r;
-  }
-  char resp[64] = "";
-  if (ok) {
-    timeval rt{10, 0};   // das Portal wandelt erst um, dann antwortet es
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof rt);
-    const int r = int(recv(fd, resp, sizeof resp - 1, 0));
-    ok = r > 12 && !std::strncmp(resp + 9, "200", 3);
-  }
-  close(fd);
+bool portalPost(const Endpoint& ep, const char* path, const uint8_t* data, int len) {
+  Body b;
+  const bool ok = request(ep, "POST", path, data, len, b);
+  if (b.c) netClose(b.c);
   return ok;
 }
 
-bool portalPoll(RadioPlayer& p, Messages* m, const char* host, int port) {
+bool portalPoll(RadioPlayer& p, Messages* m, const Endpoint& ep) {
   char path[256], body[4096];
   bool ok = true;
-  while (ok && p.takeAction(path, sizeof path)) ok = fetch(host, port, path, body, sizeof body);
-  while (ok && m && m->takeAction(path, sizeof path)) ok = fetch(host, port, path, body, sizeof body);
+  while (ok && p.takeAction(path, sizeof path)) ok = fetch(ep, path, body, sizeof body);
+  while (ok && m && m->takeAction(path, sizeof path)) ok = fetch(ep, path, body, sizeof body);
   const int16_t* rec;
   int samples;
   if (ok && m && m->takeUpload(path, sizeof path, &rec, &samples))
-    m->uploadDone(portalPost(host, port, path, reinterpret_cast<const uint8_t*>(rec), samples * 2));
+    m->uploadDone(portalPost(ep, path, reinterpret_cast<const uint8_t*>(rec), samples * 2));
   p.stateQuery(path, sizeof path);
-  ok = ok && fetch(host, port, path, body, sizeof body);
+  ok = ok && fetch(ep, path, body, sizeof body);
   if (ok) p.parse(body);
   p.setOnline(ok);
   return ok;
 }
 
-void portalStreamLoop(RadioPlayer& p, const char* (*host)(), int port, LocalFiles* local) {
-  static char extra[1024];
-  int16_t pcm[512];
+void portalStreamLoop(RadioPlayer& p, Endpoint (*endpoint)(), LocalFiles* local) {
+  static Body b;   // groß (Vorlesepuffer), nicht auf den Stapel
+  int16_t pcm[513];
   for (;;) {
     char path[64];
     const uint32_t gen = p.wantedStream(path, sizeof path);
@@ -173,40 +178,24 @@ void portalStreamLoop(RadioPlayer& p, const char* (*host)(), int port, LocalFile
       }
       continue;
     }
-    int n = 0;
-    const int fd = httpGet(host(), port, path, extra, n);
-    if (fd < 0) { sleepMs(1000); continue; }
+    if (!request(endpoint(), "GET", path, nullptr, 0, b)) { sleepMs(1000); continue; }
     // Bytes zu Samples; ein ungerades Byte wartet auf das nächste Stück
     uint8_t carry = 0;
-    bool hasCarry = false;
-    auto push = [&](const uint8_t* b, int len) {
-      int k = 0;
-      while (k < len) {
-        int m = 0;
-        if (hasCarry) { pcm[m++] = int16_t(carry | (b[k++] << 8)); hasCarry = false; }
-        while (m < 512 && k + 1 < len) { pcm[m++] = int16_t(b[k] | (b[k + 1] << 8)); k += 2; }
-        if (k + 1 == len) { carry = b[k++]; hasCarry = true; }
-        while (p.ring.space() < m) {
-          if (p.wantedStream(path, sizeof path) != gen) return;
-          sleepMs(20);
-        }
-        p.ring.write(pcm, m);
-      }
-    };
-    push(reinterpret_cast<uint8_t*>(extra), n);
-    bool ended = false;
+    bool hasCarry = false, ended = false;
     uint8_t buf[1024];
     while (p.wantedStream(path, sizeof path) == gen) {
-      if (p.ring.space() < 512) { sleepMs(20); continue; }   // Puffer voll: das Portal wartet (TCP bremst)
-      const int r = int(recv(fd, buf, sizeof buf, 0));
+      if (p.ring.space() < 1024) { sleepMs(20); continue; }   // Puffer voll: das Portal wartet (TCP bremst)
+      const int r = bodyRead(b, buf, sizeof buf, 1000);
       if (r == 0) { ended = true; break; }
-      if (r < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) continue;   // Zeitlimit, z. B. Spotify pausiert
-        break;
-      }
-      push(buf, r);
+      if (r == -2) continue;   // Zeitlimit, z. B. Spotify pausiert
+      if (r < 0) break;
+      int k = 0, m = 0;
+      if (hasCarry) { pcm[m++] = int16_t(carry | (buf[k++] << 8)); hasCarry = false; }
+      while (k + 1 < r) { pcm[m++] = int16_t(buf[k] | (buf[k + 1] << 8)); k += 2; }
+      if (k < r) { carry = buf[k]; hasCarry = true; }
+      p.ring.write(pcm, m);
     }
-    close(fd);
+    netClose(b.c);
     if (ended) {
       // Aufnahme zu Ende: abspielen lassen, was noch im Puffer ist, dann aufhören
       while (p.ring.fill() > 0 && p.wantedStream(path, sizeof path) == gen) sleepMs(50);

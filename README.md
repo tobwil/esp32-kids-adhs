@@ -78,7 +78,8 @@ firmware/    Gerät: Rendern auf Kern 1, Display/Eingabe/Audio/Netz auf Kern 0, 
              net.cpp: WLAN, Einrichtungsseite, Portal-Suche per mDNS
 lib/amoled18 Board-Schicht: Pins, Display (CO5300), Touch (CST816), IMU (QMI8658), Audio (ES8311)
 sim/         Simulator für den Mac (SDL2)
-tools/       mkfont.swift (Schriften), horses.py (Pferde-Album), quiz.py (Fragenpakete), serial_log.py, portal/ (Eltern-Portal)
+tools/       mkfont.swift (Schriften), horses.py (Pferde-Album), quiz.py (Fragenpakete), serial_log.py, portal/ (Eltern-Portal, Mac),
+             cloud/ (Eltern-Portal als Cloudflare Worker)
 quiz/        Fragenpakete als JSON: kinder-2klasse (Rätsel-App, eingebaut), 2026-10-a (Erwachsene)
 licenses/    Schriftlizenz (SIL OFL 1.1)
 ```
@@ -134,6 +135,24 @@ Alles, was das Portal speichert (Aufnahmen, Einstellungen, Spotify-Anmeldung), l
 
 Test ohne Gerät: `sim/dksim --portal-test` holt Sender und Kartenthema vom laufenden Portal, spielt den ersten Sender 3 s ab, misst den Ton und zählt die Kartenbilder. Im interaktiven Simulator spielt das Radio über die Mac-Lautsprecher (Portal-Adresse in `DK_PORTAL`, sonst 127.0.0.1).
 
+### Cloud-Portal (von unterwegs, ohne laufenden Mac)
+
+Dasselbe Portal gibt es als Cloudflare Worker (`tools/cloud`): Es läuft in der Cloud, das Gerät holt sich Einstellungen, Sender, Nachrichten, Kartenthemen und Fragen per HTTPS in jedem WLAN mit Internet, auch wenn der Mac aus ist. Speicher ist ein R2-Bucket in der EU, der kostenlose Rahmen von Cloudflare reicht für eine Familie. Spotify gibt es nur über das Mac-Portal (librespot braucht einen Rechner, der läuft).
+
+- **Anmeldung:** Eltern mit Passwort (signiertes Cookie, 60 Tage), das Gerät mit eigenem Schlüssel (`Authorization: Bearer …`). Beides liegt als Geheimnis bei Cloudflare, nicht im Repository.
+- **Umwandeln im Browser:** Aufnahmen und Hörspiele wandelt der Browser vor dem Hochladen in 16 kHz mono um (bis 50 Minuten am Stück), Kartenbilder auf 328 × 196 (ganzes Bild, Rand unscharf). Das Mac-Portal nutzt dieselbe Oberfläche.
+- **Gerät:** HTTPS mit geprüftem Zertifikat (`firmware/root_cas.h`), fragt alle 5 s (beim Abspielen alle 2 s).
+
+Einrichten (einmalig, mit eigenem Cloudflare-Konto):
+
+```bash
+tools/cloud/einrichten.sh
+```
+
+Das Skript meldet bei Cloudflare an, legt den Speicher in der EU an, erzeugt den Gerät-Schlüssel, fragt das Eltern-Passwort ab und veröffentlicht das Portal. Danach im Portal unter „Gerät verbinden“ Adresse und Schlüssel kopieren und auf der Einrichtungsseite des Geräts eintragen (Einstellungen → „WLAN einrichten“), oder per USB: `portal https://… <schlüssel>`.
+
+Lokal ausprobieren ohne Konto: `cd tools/cloud && npx wrangler dev` (Testgeheimnisse in `tools/cloud/.dev.vars`), Simulator dagegen: `DK_SCHLUESSEL=… sim/dksim --portal-test 127.0.0.1:8787`.
+
 ### SD-Karte (optional)
 
 Das Board hat einen TF-Slot (SDMMC 1-Bit: CLK 2, CMD 1, D0 3). Steckt eine Karte drin (FAT32), kopiert das Gerät alle Aufnahmen aus dem Portal (`/radio`) und die Sprachnachrichten (`/nachricht`) dorthin und spielt sie von der Karte, auch wenn der Mac aus ist. Die Senderliste für den Start ohne Netz liegt in `/radio/quellen.txt`. Spotify geht offline nicht.
@@ -178,6 +197,7 @@ tools/.venv/bin/python tools/horses.py upload     # aufs Gerät (LittleFS)
 | `log` | Zwei-Sekunden-Protokoll (fps, Zeiten, Ruckler) ein/aus, startet aus |
 | `kachel N` | zu Kachel N (0 Dashboard, 1 Gefühle, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio) |
 | `boot` | BOOT-Taste drücken (Einstellungen auf/zu) |
+| `portal [adresse [schlüssel]]` | Eltern-Portal einstellen: leer = Mac im Heimnetz, `https://…` = Cloud-Portal mit Gerät-Schlüssel |
 | `neustart-kind` | Spielstände auf Anfang (Sterne, Karten, Check-ins, Ei), Einstellungen bleiben, dann Neustart |
 | `tipp X Y` | Tippen an Display-Position X, Y |
 | `wisch X0 Y0 X1 Y1` | Wischen von X0, Y0 nach X1, Y1 |

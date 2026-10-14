@@ -14,3 +14,8 @@ doc/pferde-uebersicht.png
 
 # Eltern-Portal: Aufnahmen, Einstellungen, Spotify-Anmeldung
 tools/portal/daten/
+
+# Cloud-Portal: Abhängigkeiten, lokale Daten und Testgeheimnisse
+tools/cloud/node_modules/
+tools/cloud/.wrangler/
+tools/cloud/.dev.vars
