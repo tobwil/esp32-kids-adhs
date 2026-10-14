@@ -14,6 +14,10 @@ dk::SystemMenu* netMenu();
 void netStatus(char* out, int n);   // für den seriellen Befehl „status“
 // Portal einstellen (serieller Befehl „portal <adresse> [schlüssel]“): leer = Mac im Heimnetz, https://… = Cloud
 void netSetPortal(const char* addr, const char* key);
+// Einrichtung per USB (tools/portal/einrichten.html): WLANs suchen, Zugangsdaten setzen, Zustand melden
+void netScan();
+void netSetWifi(const char* ssid, const char* pw);
+void netWifiState(char* out, int n);
 // Sammelalbum: true = ein Thema aus dem Portal liegt in /album (sonst die eingebauten Pferde)
 bool netAlbumTheme();
 bool netTakeAlbumReload();          // neues Thema geladen: einmal true

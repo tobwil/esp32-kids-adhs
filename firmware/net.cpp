@@ -7,6 +7,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <mbedtls/base64.h>
 
 #include "portal_net.h"
 
@@ -20,6 +21,8 @@ static Messages* msgs = nullptr;
 static bool sdOk = false;
 static Preferences prefs;
 static volatile bool wifiOn = true, setupOn = false, setupStop = false, setupStart = false;
+static volatile bool scanRequest = false;
+static volatile int lastReason = 0;   // letzter Trenngrund des WLAN-Treibers (0 = keiner), für „Passwort falsch“ / „Netz nicht zu sehen“   // USB-Einrichtung: WLANs suchen (im Netz-Task, Ergebnis über Serial)
 static volatile bool reconnect = false;
 // portalHost: eingestellte Adresse. Leer = Mac-Portal im Heimnetz über mDNS suchen, „name.local[:port]“ oder IP = Mac-Portal,
 // „https://…“ = Cloud-Portal (mit Gerät-Schlüssel aus dem NVS)
@@ -128,7 +131,18 @@ static void endSetup() {
 
 // ---------------- Verbindung ----------------
 
+static void onWifiEvent(arduino_event_id_t ev, arduino_event_info_t info) {
+  if (ev == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    const int r = info.wifi_sta_disconnected.reason;
+    if (r != WIFI_REASON_STA_LEAVING && r != WIFI_REASON_ASSOC_LEAVE) lastReason = r;   // eigenes Trennen sagt nichts
+  }
+  else if (ev == ARDUINO_EVENT_WIFI_STA_GOT_IP) lastReason = 0;
+}
+
 static void connect() {
+  static bool events = false;
+  if (!events) { WiFi.onEvent(onWifiEvent); events = true; }
+  lastReason = 0;
   portENTER_CRITICAL(&epMux); ep = Endpoint(); portEXIT_CRITICAL(&epMux);
   if (!wifiOn || !ssid[0]) { WiFi.mode(WIFI_OFF); return; }
   WiFi.mode(WIFI_STA);
@@ -401,6 +415,23 @@ static void netTask(void*) {
   connect();
   for (;;) {
     if (setupStart) { setupStart = false; startSetup(); }
+    if (scanRequest) {   // Ergebnis für die Einrichtungsseite (tools/portal/einrichten.html): Name base64, weil er alles enthalten darf
+      scanRequest = false;
+      if (WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_STA);
+      const int n = WiFi.scanNetworks();
+      for (int i = 0; i < n && i < 25; i++) {
+        const String s = WiFi.SSID(i);
+        if (!s.length()) continue;
+        size_t ol = 0;
+        unsigned char b64[64];
+        mbedtls_base64_encode(b64, sizeof b64, &ol, reinterpret_cast<const unsigned char*>(s.c_str()), s.length());
+        b64[ol] = 0;
+        Serial.printf("wlan netz %d %d %s\n", WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 0 : 1, b64);
+      }
+      WiFi.scanDelete();
+      Serial.println("wlan suche fertig");
+      if (!wifiOn || !ssid[0]) WiFi.mode(WIFI_OFF);
+    }
     if (setupOn) {
       dns->processNextRequest();
       web->handleClient();
@@ -408,7 +439,7 @@ static void netTask(void*) {
       vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
-    if (reconnect) { reconnect = false; WiFi.disconnect(true); vTaskDelay(pdMS_TO_TICKS(200)); connect(); }
+    if (reconnect) { reconnect = false; WiFi.disconnect(); vTaskDelay(pdMS_TO_TICKS(500)); connect(); }
     if (!wifiOn || !ssid[0] || WiFi.status() != WL_CONNECTED) {
       radio->setOnline(false);
       vTaskDelay(pdMS_TO_TICKS(500));
@@ -436,6 +467,33 @@ void netBegin(RadioPlayer* r, Messages* m, bool sd) {
   // TLS braucht Stapel: Abfrage 16 KB, Tonstrom 12 KB
   xTaskCreatePinnedToCore(netTask, "net", 16384, nullptr, 1, nullptr, 0);
   xTaskCreatePinnedToCore(streamTask, "radio", 12288, nullptr, 2, nullptr, 0);
+}
+
+void netScan() { scanRequest = true; }
+
+void netSetWifi(const char* name, const char* pw) {
+  snprintf(ssid, sizeof ssid, "%s", name);
+  prefs.putString("ssid", ssid);
+  prefs.putString("pw", pw);
+  wifiOn = true;
+  prefs.putBool("an", true);
+  reconnect = true;
+}
+
+void netWifiState(char* out, int n) {
+  // Zustand in einer Zeile für die Einrichtungsseite: zustand ip portal(0|1) netzname(base64)
+  size_t ol = 0;
+  unsigned char b64[64];
+  mbedtls_base64_encode(b64, sizeof b64, &ol, reinterpret_cast<const unsigned char*>(ssid), strlen(ssid));
+  b64[ol] = 0;
+  const int r = lastReason;
+  const bool noAp = r == WIFI_REASON_NO_AP_FOUND || (r >= 210 && r <= 212) || WiFi.status() == WL_NO_SSID_AVAIL;
+  const bool auth = r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || r == WIFI_REASON_HANDSHAKE_TIMEOUT ||
+                    r == WIFI_REASON_AUTH_EXPIRE || WiFi.status() == WL_CONNECT_FAILED;
+  const char* st = !wifiOn ? "aus" : setupOn ? "einrichten" : !ssid[0] ? "leer" : WiFi.status() == WL_CONNECTED ? "verbunden"
+                 : auth ? "falsch" : noAp ? "nicht-gefunden" : "verbinde";
+  snprintf(out, n, "wlan zustand %s %s %d %s %d %d", st, WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "-",
+           radio && radio->online() ? 1 : 0, ol ? reinterpret_cast<char*>(b64) : "-", r, int(WiFi.status()));   // zuletzt: Trenngrund, Status
 }
 
 void netSetPortal(const char* addr, const char* key) {

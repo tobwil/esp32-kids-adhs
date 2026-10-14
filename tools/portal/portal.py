@@ -529,8 +529,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         try:
-            if u.path == "/":
-                with open(os.path.join(HERE, "index.html"), "rb") as f:
+            if u.path in ("/", "/einrichten"):   # Portal bzw. Einrichtung per USB (Web Serial)
+                with open(os.path.join(HERE, "index.html" if u.path == "/" else "einrichten.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html; charset=utf-8")
             if u.path == "/api/geraet":
                 with lock:

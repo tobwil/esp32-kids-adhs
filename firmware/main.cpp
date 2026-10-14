@@ -18,6 +18,8 @@
 //   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Sammelalbum, 6 Rätsel, 7 Radio, 8 Post, 9 Wecker)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   wisch X0 Y0 X1 Y1  Wischen von X0, Y0 nach X1, Y1
+//   wlan suchen | wlan zustand | wlan vergessen | wlan setzen <name base64> <passwort base64 oder ->
+//                  Einrichtung per USB (tools/portal/einrichten.html über Web Serial)
 //   boot           BOOT-Taste drücken (Einstellungen auf/zu)
 //   portal [A [S]] Eltern-Portal: leer = Mac im Heimnetz (mDNS), https://… = Cloud mit Gerät-Schlüssel S
 //   beruehrung     jede Berührung mit Position ausgeben ein/aus (zum Prüfen der Touch-Koordinaten)
@@ -444,6 +446,29 @@ static void pollSerial() {
         const uint32_t t0 = millis();
         for (int k = 0; k <= 8; k++) fakeTouch[fakeTouchN++] = {true, int16_t(x0 + (x1 - x0) * k / 8), int16_t(y0 + (y1 - y0) * k / 8), t0 + 33u * k};
         fakeTouch[fakeTouchN++] = {false, int16_t(x1), int16_t(y1), t0 + 33u * 9};
+      }
+    } else if (!strcmp(line, "wlan suchen")) {   // Einrichtung per USB: WLANs in der Nähe
+      netScan();
+    } else if (!strcmp(line, "wlan zustand")) {
+      char st[160];
+      netWifiState(st, sizeof st);
+      Serial.println(st);
+    } else if (!strcmp(line, "wlan vergessen")) {   // Zugangsdaten löschen, WLAN bleibt aus
+      netSetWifi("", "");
+      Serial.println("wlan gespeichert");
+    } else if (!strncmp(line, "wlan setzen ", 12)) {   // wlan setzen <name base64> <passwort base64>
+      char a[100] = "", b[100] = "";
+      unsigned char ssidB[40] = {}, pwB[72] = {};
+      size_t la = 0, lb = 0;
+      if (sscanf(line + 12, "%99s %99s", a, b) >= 1 &&
+          mbedtls_base64_decode(ssidB, sizeof ssidB - 1, &la, reinterpret_cast<unsigned char*>(a), strlen(a)) == 0 &&
+          (!b[0] || !strcmp(b, "-") || mbedtls_base64_decode(pwB, sizeof pwB - 1, &lb, reinterpret_cast<unsigned char*>(b), strlen(b)) == 0) && la > 0 && la <= 32) {
+        ssidB[la] = 0;
+        pwB[lb] = 0;
+        netSetWifi(reinterpret_cast<char*>(ssidB), reinterpret_cast<char*>(pwB));
+        Serial.println("wlan gespeichert");
+      } else {
+        Serial.println("wlan fehler");
       }
     } else if (!strncmp(line, "portal", 6)) {   // portal [adresse [schlüssel]]: Eltern-Portal einstellen
       char addr[96] = "", key[64] = "";

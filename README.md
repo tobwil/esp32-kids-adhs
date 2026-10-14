@@ -60,7 +60,9 @@ Beim Kugelspiel steuert der Finger die Kugel. Dort wirkt Wischen nur, wenn es am
 
 **Sperre:** „Nur Radio“ oder „nach Zeitplan“ (z. B. 19:30 bis 7:00) zeigt nur noch das Radio, Wischen geht nicht, die Einstellungen kommen erst nach 8 s Halten. Umschalten im Portal oder in den Einstellungen am Gerät. Der Zeitplan braucht die Uhrzeit, die kommt vom Portal.
 
-**WLAN einrichten:** Einstellungen → „WLAN einrichten“. Das Gerät öffnet das WLAN „Grummel-Setup“. Am Handy damit verbinden, die Einrichtungsseite öffnet sich von selbst (sonst `192.168.4.1`), dort Heimnetz und Passwort eintragen. Die Zugangsdaten bleiben im Gerät (NVS). „WLAN: aus“ schaltet den Funk ganz ab. Bluetooth gibt es nicht als Schalter: Der ESP32-S3 kann nur Bluetooth LE, kein Audio-Bluetooth (keine Kopfhörer oder Boxen).
+**WLAN einrichten per USB (einfachster Weg):** Gerät per USB-C an den Mac, Portal starten, in Chrome oder Edge `http://127.0.0.1:8770/einrichten` öffnen (Link auch oben im Portal). „Gerät verbinden“ spricht über Web Serial mit dem Gerät, sucht die WLANs in der Nähe und schickt Netzname und Passwort über das Kabel. Die Seite zeigt, ob die Verbindung steht, ob das Passwort falsch ist oder das Netz nicht zu sehen ist, und ob das Eltern-Portal gefunden wurde.
+
+**WLAN einrichten ohne Mac:** Einstellungen → „WLAN einrichten“. Das Gerät öffnet das WLAN „Grummel-Setup“. Am Handy damit verbinden, die Einrichtungsseite öffnet sich von selbst (sonst `192.168.4.1`), dort Heimnetz und Passwort eintragen. Die Zugangsdaten bleiben im Gerät (NVS). „WLAN: aus“ schaltet den Funk ganz ab. Bluetooth gibt es nicht als Schalter: Der ESP32-S3 kann nur Bluetooth LE, kein Audio-Bluetooth (keine Kopfhörer oder Boxen).
 
 Apps, die aus „Wie geht's dir?“ heraus geöffnet wurden, kehren danach dorthin zurück („Und wie fühlt sich dein Bauch jetzt an?“).
 
@@ -197,6 +199,7 @@ tools/.venv/bin/python tools/horses.py upload     # aufs Gerät (LittleFS)
 | `log` | Zwei-Sekunden-Protokoll (fps, Zeiten, Ruckler) ein/aus, startet aus |
 | `kachel N` | zu Kachel N (0 Dashboard, 1 Gefühle, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio) |
 | `boot` | BOOT-Taste drücken (Einstellungen auf/zu) |
+| `wlan suchen`, `wlan zustand`, `wlan setzen <name> <passwort>` (base64), `wlan vergessen` | WLAN per USB einrichten (nutzt die Einrichtungsseite) |
 | `portal [adresse [schlüssel]]` | Eltern-Portal einstellen: leer = Mac im Heimnetz, `https://…` = Cloud-Portal mit Gerät-Schlüssel |
 | `neustart-kind` | Spielstände auf Anfang (Sterne, Karten, Check-ins, Ei), Einstellungen bleiben, dann Neustart |
 | `tipp X Y` | Tippen an Display-Position X, Y |
