@@ -24,12 +24,15 @@
 #include "checkin.h"
 #include "home.h"
 #include "album.h"
+#include "horses.h"
 #include "album_builtin.h"
 #include "quiz.h"
 #include "quiz_kids.h"
 #include "rewards.h"
 #include "riddle.h"
 #include "radio.h"
+#include "post.h"
+#include "wakeup.h"
 #include "portal_net.h"
 #include "portal_sync.h"
 #include <mutex>
@@ -186,11 +189,14 @@ struct PortalImages : ImageStore {
   void reload() override { cards.clear(); thumbs.clear(); }
 };
 
-// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio
-enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO };
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Sammelalbum, 6 Rätsel, 7 Radio, 8 Post, 9 Wecker (versteckt)
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO, T_POST, T_WAKE };
 static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3},
-                                     {"Pferde", T_ALBUM, 4},    {"Rätsel", T_RIDDLE, 5},    {"Radio", T_RADIO, 6}};
+                                     {"Pferde", T_ALBUM, 4},    {"Rätsel", T_RIDDLE, 5},    {"Radio", T_RADIO, 6},  {"Post", T_POST, 7}};
+static constexpr int N_APPS = sizeof(APPS) / sizeof(APPS[0]);
 static RadioPlayer gRadio;
+static Messages gMsgs;
+static std::vector<int16_t> gRecBuf(Messages::RATE * Messages::MAX_SECS);
 
 // Gerätemenü im Simulator: nur Zustand, WLAN gibt es hier nicht
 struct SimMenu : SystemMenu {
@@ -212,25 +218,31 @@ struct Kids {
   Album album;
   Riddle riddle;
   Radio radio{gRadio};
+  Post post;
+  Wakeup wake;
   QuizPack pack;
   FileImages images;
   Kids(Synth& synth, Store& store, uint32_t seed)
       : home(synth, store), checkin(synth, store), grummel(synth, store, seed, KID_SKIN), breathe(synth, store), balance(synth, store), album(synth, store, seed * 7 + 3),
-        riddle(synth, store, seed * 13 + 5) {
+        riddle(synth, store, seed * 13 + 5), post(synth, gMsgs, gRadio), wake(synth, store, gRadio) {
+    gMsgs.setBuffer(gRecBuf.data(), int(gRecBuf.size()));
+    gRadio.setMessages(&gMsgs);
+    home.setPost(&gMsgs, T_POST);
     album.setImages(&images);
     album.load(ALBUM_BUILTIN);
     pack.load(QUIZ_KIDS);
     riddle.setPack(&pack);
     riddle.setAlbum(&album, &images);
-    home.setApps(APPS, 7);
+    home.setApps(APPS, N_APPS);
     home.setAlbum(&album);
     home.setCheckIn(T_CHECKIN);
     checkin.setTargets(T_GRUMMEL, T_BREATHE);
   }
   bool startOff = true;
   void addTo(App& app) {
-    app.add(&home); app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album); app.add(&riddle); app.add(&radio);
+    app.add(&home); app.add(&checkin); app.add(&grummel); app.add(&breathe); app.add(&balance); app.add(&album); app.add(&riddle); app.add(&radio); app.add(&post); app.add(&wake);
     app.setHome(T_HOME);
+    app.setHidden(1u << T_WAKE);
     app.setLockTile(T_RADIO);
     app.setSystemMenu(&gMenu);
     app.setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
@@ -279,7 +291,7 @@ static int screens(const char* dir) {
     for (auto& i : gIssues) { printf("  %s: %s\n", name, i.c_str()); nIssues++; }
   };
   auto tapFace = [&](int i) { float x, y; CheckIn::faceCenter(i, x, y); sc.tap(int(x), int(y)); };
-  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, 7, x, y); sc.tap(int(x), int(y)); };
+  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, N_APPS, x, y); sc.tap(int(x), int(y)); };
   // Wischen in 8 Schritten; mid: Bildname für ein Bild mitten im Wisch
   auto swipe = [&](int x0, int y0, int x1, int y1, const char* mid = nullptr) {
     sc.touch(true, x0, y0); sc.frame();
@@ -437,6 +449,45 @@ static int screens(const char* dir) {
     kids.album.load(ALBUM_BUILTIN);
     close();
   }
+  // Post: Nachricht von Papa, Kontakte, aufnehmen und senden
+  gRadio.parse("zeit 1792500000\nsperre 0 1170 420\nlaut 70\nschlaf 30\nquelle a1 aufnahme Gute-Nacht-Geschichte\n"
+               "nachricht n2 0 Papa\nnachricht n1 1 Oma Gisela\nkontakt k1 Mama\nkontakt k2 Papa\nkontakt k3 Oma Gisela\n");
+  app.show(T_HOME); sc.run(1.0f); shot("37_post_von_papa");
+  tapIcon(7); sc.run(0.6f); shot("38_post_liste");
+  { float x, y, w, h; Post::rowRect(0, x, y, w, h); sc.tap(int(x + w / 2), int(y + h / 2)); sc.run(0.3f); }
+  if (!gRadio.clipPlaying() || gMsgs.unheard() != 0) printf("  FEHLER: Nachricht spielt nicht oder bleibt ungehört\n"), nIssues++;
+  { char a[96]; bool heard = false; while (gMsgs.takeAction(a, sizeof a)) heard |= std::strstr(a, "gehoert?id=n2") != nullptr;
+    if (!heard) printf("  FEHLER: „gehört“ geht nicht ans Portal\n"), nIssues++; }
+  shot("39_post_spielt");
+  gRadio.stopClip();
+  { float x, y; Post::contactPos(1, 3, x, y); sc.tap(int(x), int(y)); sc.run(0.6f); shot("40_post_an_papa"); }
+  sc.tap(int(Post::REC_X), int(Post::REC_Y)); sc.run(0.2f);
+  { int16_t b[16000]; for (int i = 0; i < 16000; i++) b[i] = int16_t(3000 * std::sin(i * 0.05f)); for (int k = 0; k < 3; k++) { gMsgs.feed(b, 16000); sc.in.voice = 0.6f; sc.run(0.3f); } }
+  shot("41_post_nimmt_auf");
+  sc.in.voice = 0;
+  sc.tap(int(Post::REC_X), int(Post::REC_Y)); sc.run(0.4f); shot("42_post_fertig");
+  sc.tap(int(Post::REC_X + Post::ACT_DX), int(Post::ACT_Y)); sc.run(0.8f); shot("43_post_gesendet");
+  { char p[96]; const int16_t* d; int n = 0;
+    if (!gMsgs.takeUpload(p, sizeof p, &d, &n) || !std::strstr(p, "an=k2") || n < 40000) printf("  FEHLER: Aufnahme nicht zum Senden bereit (%d Samples)\n", n), nIssues++;
+    else gMsgs.uploadDone(true); }
+  sc.run(3.0f);
+  close();
+  // Wecker kommt auch durch die Sperre, danach zurück zum Radio
+  app.setLock(1, 1170, 420); sc.run(1.0f);
+  app.alert(T_WAKE); sc.run(12.0f); shot("44_wecker");
+  if (app.current() != T_WAKE) printf("  FEHLER: Wecker erscheint nicht (%d)\n", app.current()), nIssues++;
+  sc.tap(184, 300); sc.run(1.0f);
+  if (app.current() != T_RADIO) printf("  FEHLER: nach dem Wecker nicht zurück zum Radio (%d)\n", app.current()), nIssues++;
+  // Nachtlicht: Schlafenszeit ganztags, Bildschirm geht aus → dunkle Uhr
+  gRadio.nightLight = true;
+  { PortalSync ps; ps.frame(app, gRadio, "x", 0, sc.ms); }   // übernimmt auch die Sperrzeiten vom „Portal“, deshalb danach:
+  app.setLock(0, 0, 1439);
+  sc.run(190.0f); shot("45_nachtlicht");
+  if (app.screenOff() || app.brightness() > 20) printf("  FEHLER: Nachtlicht fehlt (aus %d, Helligkeit %d)\n", app.screenOff(), app.brightness()), nIssues++;
+  gRadio.nightLight = false;
+  { PortalSync ps; ps.frame(app, gRadio, "x", 0, sc.ms); }
+  app.setLock(0, 1170, 420);
+  sc.tap(184, 300); sc.run(1.0f);
   // Einstellungen: 3 s auf eine freie Stelle drücken
   sc.touch(true, 30, 230); sc.run(3.4f); sc.touch(false, 30, 230); sc.frame(); sc.run(0.5f); shot("25_einstellungen");
   swipe(184, 380, 184, 120); sc.run(0.3f); shot("25b_einstellungen_unten");
@@ -473,25 +524,53 @@ static int bench() {
 
 // Ende-zu-Ende mit dem laufenden Portal: Sender holen, ersten abspielen, Ton messen
 static int portalTest(const char* host) {
-  if (!portalPoll(gRadio, host, 8770)) { printf("Portal %s nicht erreichbar\n", host); return 1; }
+  gMsgs.setBuffer(gRecBuf.data(), int(gRecBuf.size()));
+  gRadio.setMessages(&gMsgs);
+  if (!portalPoll(gRadio, &gMsgs, host, 8770)) { printf("Portal %s nicht erreichbar\n", host); return 1; }
   const int n = gRadio.count();
   printf("Portal erreichbar, %d Sender\n", n);
   for (int i = 0; i < n; i++) { RadioSource s; gRadio.source(i, s); printf("  %s  %s  %s\n", s.id, s.spotify ? "spotify" : "aufnahme", s.name); }
-  if (!n) return 0;
   std::thread([] { portalStreamLoop(gRadio, [] { return "127.0.0.1"; }, 8770); }).detach();
-  gRadio.play();
   int16_t buf[1600];
   double sum = 0;
   long cnt = 0;
-  for (int k = 0; k < 30; k++) {   // 3 s in Echtzeit
-    gRadio.tick(0.1f);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    std::memset(buf, 0, sizeof buf);
-    gRadio.mix(buf, 1600);
-    for (int16_t v : buf) { sum += double(v) * v; cnt++; }
+  if (n) {
+    gRadio.play();
+    for (int k = 0; k < 30; k++) {   // 3 s in Echtzeit
+      gRadio.tick(0.1f);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::memset(buf, 0, sizeof buf);
+      gRadio.mix(buf, 1600);
+      for (int16_t v : buf) { sum += double(v) * v; cnt++; }
+    }
   }
-  portalPoll(gRadio, host, 8770);   // schickt auch die Befehle (play) ans Portal
+  portalPoll(gRadio, &gMsgs, host, 8770);   // schickt auch die Befehle (play) ans Portal
   printf("Album-Thema: %s (Version %08x)\n", gRadio.albumTheme, unsigned(gRadio.albumVersion));
+  printf("Wecker %s %d:%02d Tage %02x Ton %s, Nachtlicht %s, %d Dateien für die SD-Karte\n", gRadio.alarmOn ? "an" : "aus", gRadio.alarmMin / 60, gRadio.alarmMin % 60,
+         gRadio.alarmDays, gRadio.alarmTone, gRadio.nightLight ? "an" : "aus", gRadio.nFiles);
+  printf("Post: %d Nachrichten (%d neu), %d Kontakte\n", gMsgs.count(), gMsgs.unheard(), gMsgs.contacts());
+  Message msg;
+  Contact con;
+  if (gMsgs.newest(msg)) {   // anhören: Clip läuft über den Tonstrom
+    char path[48];
+    snprintf(path, sizeof path, "/nachricht/%s.pcm", msg.id);
+    gRadio.stop();
+    gRadio.playClip(path);
+    gMsgs.markHeard(msg.id);
+    double sum = 0; long cnt = 0;
+    for (int k = 0; k < 15; k++) { gRadio.tick(0.1f); std::this_thread::sleep_for(std::chrono::milliseconds(100)); std::memset(buf, 0, sizeof buf); gRadio.mix(buf, 1600); for (int16_t v : buf) { sum += double(v) * v; cnt++; } }
+    printf("  Nachricht von %s angehört, Pegel %.0f\n", msg.from, std::sqrt(sum / std::max(1L, cnt)));
+  }
+  if (gMsgs.contact(0, con)) {   // antworten: 1,5 s Ton aufnehmen und senden
+    gMsgs.startRecording();
+    int16_t b[24000];
+    for (int i = 0; i < 24000; i++) b[i] = int16_t(5000 * std::sin(i * 0.03f));
+    gMsgs.feed(b, 24000);
+    gMsgs.stopRecording();
+    gMsgs.send(con.id);
+    portalPoll(gRadio, &gMsgs, host, 8770);
+    printf("  Antwort an %s %s\n", con.name, gMsgs.sending() ? "NICHT gesendet" : "gesendet");
+  }
   if (std::strcmp(gRadio.albumTheme, "pferde") != 0) {
     std::vector<uint8_t> raw;
     if (portalDownload(host, 8770, "/album/karten.txt", PortalImages::sink, &raw)) {
@@ -510,8 +589,28 @@ static int portalTest(const char* host) {
   return 0;
 }
 
+// gezeichnete Pferde als Kartenbilder (328×196) für Vorführungen, ohne fremde Fotos
+static int horseImages(const char* dir) {
+  static const Horse H[4] = {{"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false}, {"", 160, Coat::BLACK, 0x2a2420, 0x15110f, true},
+                             {"", 150, Coat::GREY, 0xe8e4dc, 0xc8c2b8, false}, {"", 140, Coat::PINTO, 0x8a5a3a, 0x3a2418, false}};
+  static const uint32_t SKY[4] = {0x9cc8f0, 0xf0c89c, 0xb8d8f0, 0xc8b8f0};
+  for (int i = 0; i < 4; i++) {
+    scene.reset();
+    scene.ellipse(164, 60, 420, 200, hex(SKY[i]), hex(0xf6f0e0));
+    scene.ellipse(164, 260, 360, 110, hex(0x7cc06a), hex(0x4a9a4a));
+    scene.circle(270, 50, 22, hex(0xfff0b0));
+    drawHorse(scene, H[i], 150, 170, 1.15f, 0.3f);
+    renderAll();
+    char p[512];
+    snprintf(p, sizeof p, "%s/pferd%d.bmp", dir, i + 1);
+    saveBmp(p);
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc > 2 && !strcmp(argv[1], "--screens")) return screens(argv[2]);
+  if (argc > 2 && !strcmp(argv[1], "--pferdebilder")) return horseImages(argv[2]);
   if (argc > 1 && !strcmp(argv[1], "--portal-test")) return portalTest(argc > 2 ? argv[2] : "127.0.0.1");
   if (argc > 1 && !strcmp(argv[1], "--bench")) return bench();
 
@@ -541,7 +640,7 @@ int main(int argc, char** argv) {
 
   // Eltern-Portal (tools/portal): Adresse aus DK_PORTAL, sonst der Mac selbst
   static std::string portalHost = getenv("DK_PORTAL") ? getenv("DK_PORTAL") : "127.0.0.1";
-  std::thread([] { for (;;) { portalPoll(gRadio, portalHost.c_str(), 8770); std::this_thread::sleep_for(std::chrono::seconds(2)); } }).detach();
+  std::thread([] { for (;;) { portalPoll(gRadio, &gMsgs, portalHost.c_str(), 8770); std::this_thread::sleep_for(std::chrono::seconds(2)); } }).detach();
   std::thread([] { portalStreamLoop(gRadio, [] { return portalHost.c_str(); }, 8770); }).detach();
   PortalSync sync;
   static PortalImages portalImages;
@@ -635,7 +734,14 @@ int main(int argc, char** argv) {
       }
     }
     app.tick(in);
-    sync.frame(app, gRadio, app.currentTitle(), starsGet(store), now);
+    sync.frame(app, gRadio, app.currentTitle(), starsGet(store), now, in.epoch, T_WAKE);
+    if (gMsgs.recording()) {   // kein Mikrofon im Simulator: Ton erzeugen (M halten = lauter)
+      static float ph = 0;
+      int16_t b[600];
+      const int n = std::min(600, int(Messages::RATE * 0.033f));
+      for (int i = 0; i < n; i++) { ph += 0.06f; b[i] = int16_t((in.voice > 0 ? 6000 : 800) * std::sin(ph)); }
+      gMsgs.feed(b, n);
+    }
     app.draw(scene);
     renderAll();
     if (app.screenOff()) std::memset(fb, 0, sizeof fb);

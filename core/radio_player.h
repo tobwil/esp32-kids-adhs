@@ -11,11 +11,17 @@
 //   hinweis <text …>            (z. B. „Spotify ist nicht verbunden“)
 //   apps <maske>                abgeschaltete Kacheln (Bit je Index)
 //   album <thema> <version>     aktives Kartenthema (eingebaut: „pferde 0“), Version ändert sich bei jeder Bearbeitung
+//   wecker <an> <min> <tage> <ton>  Wecker: Minuten seit Mitternacht, Tage als Bitmaske (Bit 0 = Montag), Ton „melodie“ oder Sender-ID
+//   nacht <0|1>                 Nachtlicht mit Uhr in der Schlafenszeit
+//   datei <id> <bytes>          Aufnahme zum Mitnehmen auf die SD-Karte (Offline-Bibliothek)
+//   nachricht …, kontakt …      siehe messages.h
 // Ton: GET /radio/<id>.pcm liefert 16 Bit mono mit Synth::RATE (Spotify: ein gemeinsamer Live-Strom /radio/spotify.pcm).
 #pragma once
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+
+#include "messages.h"
 
 namespace dk {
 
@@ -53,6 +59,10 @@ class RadioPlayer {
   void stop();
   bool playing() const { return playing_; }
   void skip();                        // Spotify: nächstes Lied
+  // Clip dazwischen (Sprachnachricht): das Radio pausiert und läuft danach weiter
+  void playClip(const char* path);
+  bool clipPlaying() const { return clip_; }
+  void stopClip();
   void setVolume(int v);              // 0..100 (begrenzt durch die Eltern)
   int volume() const { return vol_; }
   int maxVolume() const { return maxVol_; }
@@ -81,6 +91,14 @@ class RadioPlayer {
   int lockMode = -1, lockFrom = 0, lockTo = 0;   // -1 = noch nichts vom Portal
   int sleepMin = 0;
   long appsOff = -1;                  // -1 = noch nichts vom Portal
+  bool alarmOn = false, nightLight = false;
+  int alarmMin = 7 * 60, alarmDays = 0x1F;
+  char alarmTone[32] = "melodie";
+  struct File { char id[32]; long bytes; };
+  static constexpr int MAX_FILES = 12;
+  File files[MAX_FILES];
+  int nFiles = 0;
+  void setMessages(Messages* m) { msgs_ = m; }
   char albumTheme[24] = "";
   uint32_t albumVersion = 0;
 
@@ -94,6 +112,9 @@ class RadioPlayer {
 
  private:
   char deviceState_[96] = "";
+  Messages* msgs_ = nullptr;
+  bool clip_ = false, resume_ = false;
+  char clipPath_[48] = "";
   void queue(const char* fmt, const char* arg = "");
 
   std::mutex mu_;

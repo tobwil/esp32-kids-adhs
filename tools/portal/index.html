@@ -42,6 +42,9 @@
   .grid label.wide { grid-column:1 / -1; }
   .grid input[type=text] { width:100%; }
   .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  .chip { display:inline-flex; gap:6px; align-items:center; padding:4px 6px 4px 12px; border-radius:999px; background:var(--acc2); }
+  .chip button { border:0; background:transparent; color:var(--dim); cursor:pointer; font-size:16px; }
+  .neu { color:#fff; background:var(--acc); border-radius:999px; font-size:12px; padding:1px 8px; }
   .card { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--bg); }
   .card img, .card .noimg { width:100%; aspect-ratio:328/196; object-fit:cover; display:block; background:var(--acc2); }
   .card .noimg { display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
@@ -64,11 +67,40 @@
         <button data-m="0">Aus</button><button data-m="1">Nur Radio</button><button data-m="2">Nach Zeitplan</button>
       </div>
     </div>
-    <div class="row" style="margin-top:12px" id="plan">
+    <div class="row" style="margin-top:12px">
+      <span>Schlafenszeit</span>
       <label>von <input type="time" id="von"></label>
       <label>bis <input type="time" id="bis"></label>
     </div>
-    <p class="hint">Gesperrt zeigt das Gerät nur das Radio, Wischen geht nicht. Am Gerät entsperren: 8 Sekunden auf den Bildschirm drücken, dann „Sperre“ antippen.</p>
+    <div class="row" style="margin-top:8px"><label><input type="checkbox" id="nachtlicht"> Nachtlicht: in der Schlafenszeit statt schwarz eine sehr dunkle Uhr mit Mond</label></div>
+    <p class="hint">Gesperrt zeigt das Gerät nur das Radio, Wischen geht nicht. „Nach Zeitplan“ sperrt in der Schlafenszeit. Am Gerät entsperren: 8 Sekunden auf den Bildschirm drücken, dann „Sperre“ antippen.</p>
+  </section>
+
+  <section>
+    <h2>Wecker</h2>
+    <div class="row">
+      <label><input type="checkbox" id="w_an"> an</label>
+      <input type="time" id="w_zeit">
+      <span id="w_tage" class="row"></span>
+    </div>
+    <div class="row" style="margin-top:8px"><label>Weckton <select id="w_ton"></select></label></div>
+    <p class="hint">Zur Weckzeit geht die Sonne auf dem Gerät auf, die Melodie wird langsam lauter (auch wenn der Ton sonst aus ist). Antippen beendet den Wecker. Die Uhrzeit hält das Gerät auch ohne Portal.</p>
+  </section>
+
+  <section id="post">
+    <h2>Post</h2>
+    <p class="hint" style="margin-top:0">Sprachnachrichten nur mit diesen Kontakten (höchstens 4). Sie erscheinen auf dem Gerät als große Knöpfe.</p>
+    <div class="row" id="kontakte"></div>
+    <div class="row" style="margin-top:8px"><input type="text" id="k_neu_name" placeholder="z. B. Mama, Papa, Oma Gisela" maxlength="16"><button class="b" id="k_neu_add">Kontakt hinzufügen</button></div>
+    <h3 style="margin:16px 0 6px">Nachricht ans Gerät</h3>
+    <div class="row">
+      <label>von <select id="n_von"></select></label>
+      <button class="b p" id="n_rec">● Aufnehmen</button><span id="n_info"></span>
+      <audio id="n_play" controls hidden></audio><button class="b" id="n_send" hidden>Senden</button>
+      <label class="b">Datei …<input type="file" id="n_datei" accept="audio/*" hidden></label>
+    </div>
+    <p class="err" id="n_err"></p>
+    <ul id="nachrichten" style="margin-top:8px"></ul>
   </section>
 
   <section>
@@ -197,7 +229,6 @@ async function refresh() {
   $("geraet").innerHTML = '<span class="dot ' + (g.online ? "on" : "") + '"></span> ' + esc(line);
 
   document.querySelectorAll("#sperre button").forEach((b) => b.classList.toggle("on", +b.dataset.m === state.sperre.modus));
-  $("plan").style.display = state.sperre.modus === 2 ? "" : "none";
   if (document.activeElement !== $("von")) $("von").value = hm(state.sperre.von);
   if (document.activeElement !== $("bis")) $("bis").value = hm(state.sperre.bis);
   if (document.activeElement !== $("laut")) { $("laut").value = state.laut; $("lautw").textContent = state.laut + " %"; }
@@ -220,6 +251,8 @@ async function refresh() {
   }
   $("leer").style.display = state.quellen.length ? "none" : "";
   renderApps();
+  renderPost();
+  renderAlarm();
 
   const sp = state.spotify;
   $("spstatus").innerHTML = "librespot: " + esc(sp.librespot) + " · Web-API: " + (sp.verbunden ? "verbunden" : "nicht verbunden")
@@ -267,6 +300,8 @@ async function loadAlben() {
     }
     ul.appendChild(li);
   });
+  const h = location.hash.match(/^#album=([a-z0-9-]+)/);   // Direktlink öffnet ein Thema
+  if (h && !offen) { offen = h[1]; openAlbum(offen); document.getElementById("album").scrollIntoView(); return; }
   if (offen) openAlbum(offen, true);
 }
 function themeForm(a) {
@@ -362,44 +397,120 @@ $("laut").onchange = () => saveSettings({ laut: +$("laut").value });
 $("schlaf").onchange = () => saveSettings({ schlaf: +$("schlaf").value });
 $("zufall").onchange = () => saveSettings({ zufall: $("zufall").checked });
 
-// ---- Aufnahme ----
-let rec = null, chunks = [], blob = null, recStart = 0, recTimer = null;
-$("recbtn").onclick = async () => {
-  $("aerr").textContent = "";
-  if (rec && rec.state === "recording") { rec.stop(); return; }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    rec = new MediaRecorder(stream);
-    chunks = [];
-    rec.ondataavailable = (e) => chunks.push(e.data);
-    rec.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-      clearInterval(recTimer);
-      blob = new Blob(chunks, { type: rec.mimeType });
-      $("recplay").src = URL.createObjectURL(blob);
-      $("recplay").hidden = false; $("recsave").hidden = false;
-      $("recbtn").textContent = "● Neu aufnehmen";
-      $("recinfo").textContent = "";
-    };
-    rec.start();
-    recStart = Date.now();
-    $("recbtn").textContent = "■ Stopp";
-    $("recplay").hidden = true; $("recsave").hidden = true;
-    recTimer = setInterval(() => { const s = Math.round((Date.now() - recStart) / 1000); $("recinfo").innerHTML = '<span class="rec">● ' + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + "</span>"; }, 250);
-  } catch (e) {
-    $("aerr").textContent = "Kein Mikrofon: " + e.message + " (im Browser am Mac unter http://127.0.0.1:8770 öffnen oder eine Datei hochladen)";
-  }
-};
+// ---- Aufnahme im Browser (für Sender und für Nachrichten) ----
+function recorder(btn, info, player, save, err) {
+  const r = { blob: null, rec: null };
+  btn.onclick = async () => {
+    err.textContent = "";
+    if (r.rec && r.rec.state === "recording") { r.rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      r.rec = new MediaRecorder(stream);
+      r.rec.ondataavailable = (e) => chunks.push(e.data);
+      let timer = null;
+      r.rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(timer);
+        r.blob = new Blob(chunks, { type: r.rec.mimeType });
+        player.src = URL.createObjectURL(r.blob);
+        player.hidden = false; save.hidden = false;
+        btn.textContent = "● Neu aufnehmen";
+        info.textContent = "";
+      };
+      r.rec.start();
+      const start = Date.now();
+      btn.textContent = "■ Stopp";
+      player.hidden = true; save.hidden = true;
+      timer = setInterval(() => { const s = Math.round((Date.now() - start) / 1000); info.innerHTML = '<span class="rec">● ' + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + "</span>"; }, 250);
+    } catch (e) {
+      err.textContent = "Kein Mikrofon: " + e.message + " (im Browser am Mac unter http://127.0.0.1:8770 öffnen oder eine Datei hochladen)";
+    }
+  };
+  r.reset = () => { r.blob = null; player.hidden = true; save.hidden = true; btn.textContent = "● Aufnehmen"; };
+  r.type = () => (r.blob.type.split("/")[1] || "webm").split(";")[0];
+  return r;
+}
+const srcRec = recorder($("recbtn"), $("recinfo"), $("recplay"), $("recsave"), $("aerr"));
+const msgRec = recorder($("n_rec"), $("n_info"), $("n_play"), $("n_send"), $("n_err"));
 async function upload(data, typ) {
   const name = $("aname").value.trim() || "Aufnahme " + new Date().toLocaleDateString("de-DE");
   $("aerr").textContent = "Wird umgewandelt …";
   const r = await fetch("/api/aufnahme?name=" + encodeURIComponent(name) + "&typ=" + encodeURIComponent(typ), { method: "POST", body: data });
   const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
   $("aerr").textContent = j.ok ? "" : j.fehler;
-  if (j.ok) { $("aname").value = ""; $("recplay").hidden = true; $("recsave").hidden = true; $("recbtn").textContent = "● Aufnehmen"; }
+  if (j.ok) { $("aname").value = ""; srcRec.reset(); }
   refresh();
 }
-$("recsave").onclick = () => upload(blob, (blob.type.split("/")[1] || "webm").split(";")[0]);
+$("recsave").onclick = () => upload(srcRec.blob, srcRec.type());
+
+// ---- Post ----
+async function sendMsg(data, typ) {
+  $("n_err").textContent = "Wird umgewandelt …";
+  const r = await fetch("/api/nachricht/senden?von=" + encodeURIComponent($("n_von").value) + "&typ=" + encodeURIComponent(typ), { method: "POST", body: data });
+  const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
+  $("n_err").textContent = j.ok ? "Gesendet. Grummel sagt auf dem Gerät Bescheid." : j.fehler;
+  if (j.ok) msgRec.reset();
+  refresh();
+}
+$("n_send").onclick = () => sendMsg(msgRec.blob, msgRec.type());
+$("n_datei").onchange = (e) => { const f = e.target.files[0]; if (f) sendMsg(f, (f.name.split(".").pop() || "bin").toLowerCase()); e.target.value = ""; };
+$("k_neu_add").onclick = async () => { try { await post("/api/kontakt", { name: $("k_neu_name").value }); $("k_neu_name").value = ""; } catch (e) { alert(e.message); } refresh(); };
+function renderPost() {
+  const box = $("kontakte");
+  box.innerHTML = state.kontakte.length ? "" : '<span class="hint">Noch keine Kontakte.</span>';
+  state.kontakte.forEach((k) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.innerHTML = esc(k.name) + '<button title="entfernen">×</button>';
+    c.querySelector("button").onclick = async () => { if (confirm("Kontakt „" + k.name + "“ entfernen?")) { await post("/api/kontakt/loeschen", { id: k.id }); refresh(); } };
+    box.appendChild(c);
+  });
+  const sel = $("n_von");
+  if (document.activeElement !== sel) {
+    const v = sel.value;
+    sel.innerHTML = state.kontakte.map((k) => '<option value="' + k.id + '">' + esc(k.name) + "</option>").join("");
+    if (v) sel.value = v;
+  }
+  const ul = $("nachrichten");
+  if ([...ul.querySelectorAll("audio")].some((a) => !a.paused)) return;   // nicht beim Abspielen neu aufbauen
+  const names = Object.fromEntries(state.kontakte.map((k) => [k.id, k.name]));
+  ul.innerHTML = "";
+  state.nachrichten.forEach((m) => {
+    const li = document.createElement("li");
+    li.className = "src";
+    const when = new Date(m.zeit * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    const wer = m.richtung === "vom_kind" ? "vom Gerät an " + esc(names[m.kontakt] || "Eltern") : "von " + esc(names[m.kontakt] || "Eltern") + " ans Gerät";
+    const st = m.richtung === "vom_kind" ? (m.gehoert ? "" : ' <span class="neu">neu</span>') : (m.gehoert ? " · angehört" : " · noch nicht angehört");
+    li.innerHTML = '<span class="name">' + wer + st + '<br><span class="hint">' + when + " · " + m.sekunden + ' s</span></span><audio controls preload="none" src="/nachricht/' + m.id + '.wav"></audio><button class="b">Löschen</button>';
+    li.querySelector("audio").onplay = () => { if (m.richtung === "vom_kind" && !m.gehoert) post("/api/nachricht/gelesen", { id: m.id }); };
+    li.querySelector("button").onclick = async () => { await post("/api/nachricht/loeschen", { id: m.id }); refresh(); };
+    ul.appendChild(li);
+  });
+  if (!state.nachrichten.length) ul.innerHTML = '<li class="hint">Noch keine Nachrichten.</li>';
+}
+
+// ---- Wecker ----
+const TAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+TAGE.forEach((t, i) => { const l = document.createElement("label"); l.innerHTML = '<input type="checkbox" data-t="' + i + '"> ' + t; $("w_tage").appendChild(l); });
+function saveAlarm() {
+  let tage = 0;
+  $("w_tage").querySelectorAll("input").forEach((c) => { if (c.checked) tage |= 1 << +c.dataset.t; });
+  saveSettings({ wecker: { an: $("w_an").checked, min: mins($("w_zeit").value || "07:00"), tage, ton: $("w_ton").value } });
+}
+["w_an", "w_zeit", "w_ton"].forEach((id) => $(id).onchange = saveAlarm);
+$("w_tage").onchange = saveAlarm;
+$("nachtlicht").onchange = () => saveSettings({ nachtlicht: $("nachtlicht").checked });
+function renderAlarm() {
+  const w = state.wecker;
+  if ([$("w_an"), $("w_zeit"), $("w_ton")].includes(document.activeElement)) return;
+  $("w_an").checked = w.an;
+  $("w_zeit").value = hm(w.min);
+  $("w_tage").querySelectorAll("input").forEach((c) => c.checked = !!(w.tage >> +c.dataset.t & 1));
+  $("w_ton").innerHTML = '<option value="melodie">Grummel-Melodie</option>' + state.quellen.map((q) => '<option value="' + q.id + '">' + esc(q.name) + "</option>").join("");
+  $("w_ton").value = w.ton;
+  $("nachtlicht").checked = state.nachtlicht;
+}
 $("datei").onchange = (e) => { const f = e.target.files[0]; if (f) upload(f, (f.name.split(".").pop() || "bin").toLowerCase()); e.target.value = ""; };
 
 // ---- Spotify ----

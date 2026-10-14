@@ -1,8 +1,14 @@
 # esp32-kids-adhs
 
-Ein ruhiger Begleiter für Kinder auf dem **Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2)**. Er soll helfen, mit „Wut im Bauch“ umzugehen: Gefühle benennen, Wut wegfüttern, gemeinsam atmen. Dazu kommen ein ruhiges Geschicklichkeitsspiel, Rätsel für die 2. Klasse, ein Pferde-Album zum Sammeln und ein Elternradio mit eigenen Aufnahmen und Spotify-Playlists, gesteuert über ein Eltern-Portal im Heimnetz. Es ist eine Unterstützung im Alltag, keine Therapie.
+Ein ruhiger Begleiter für Kinder auf dem **Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2)**. Er soll helfen, mit „Wut im Bauch“ umzugehen: Gefühle benennen, Wut wegfüttern, gemeinsam atmen. Dazu kommen ein ruhiges Geschicklichkeitsspiel, Rätsel für die 2. Klasse, ein Sammelalbum, ein Elternradio mit eigenen Aufnahmen und Spotify-Playlists, Sprachnachrichten mit Mama und Papa, ein sanfter Wecker und ein Nachtlicht. Gesteuert wird alles über ein Eltern-Portal im Heimnetz. Es ist eine Unterstützung im Alltag, keine Therapie.
 
 ![Kinderversion im Simulator](doc/kinder-ablauf.png)
+
+Eltern-Portal (Vorführdaten, Kartenbilder gezeichnet):
+
+| Übersicht | Sammelalbum bearbeiten | am Handy |
+|---|---|---|
+| <img src="doc/portal.png" width="320"> | <img src="doc/portal-album.png" width="320"> | <img src="doc/portal-handy.png" width="180"> |
 
 ## Dashboard und Apps
 
@@ -27,7 +33,14 @@ Unter Grummel liegen die App-Symbole. Jede App öffnet bildschirmfüllend. Wisch
 | Kugel ins Loch | Kugeln ins Loch rollen, per Finger als Joystick oder per Neigen. Jede Runde hat ihre Landschaft (Wiese, Strand, Holztisch, Nachthimmel). Ohne Zeitdruck, nach 4 Runden kommt eine Pause |
 | Rätsel | 5 Fragen pro Runde für die 2. Klasse (Rechnen bis 100, Zählen mit Bild, Tiere und Natur, Zeit, Sprache, Körper). Bei Zählbildern hilft Antippen beim Mitzählen. Ab drei gesammelten Pferdekarten kommt eine Bonusfrage „Welches Pferd ist das?“ mit Foto aus dem Album. Bei falscher Antwort zeigt das Gerät freundlich die Lösung und wartet. Ein Stern pro Runde, egal wie viele richtig waren |
 | Sammelalbum | Sammelkarten mit Foto und Infos, eingebaut sind 24 Pferderassen (Typ, Herkunft, Größe, Farben, Wesen, „Wusstest du?“). Eigene Themen (Dinos, Katzen, …) mit eigenen Bildern legen die Eltern im Portal an. Alle 3 Sterne aus den Übungen gibt es eine neue Karte, nie doppelt. Jedes Thema hat einen eigenen Sammelstand |
-| Radio | Sender aus dem Eltern-Portal: eigene Aufnahmen (Gute-Nacht-Geschichten, Hörspiele) und Spotify-Playlists. Großer Abspielknopf, Pfeile wechseln den Sender, − und + die Lautstärke (höchstens so laut, wie die Eltern erlauben). Ein Schlaf-Timer blendet nach der eingestellten Zeit langsam aus |
+| Radio | Sender aus dem Eltern-Portal: eigene Aufnahmen (Gute-Nacht-Geschichten, Hörspiele) und Spotify-Playlists. Großer Abspielknopf, Pfeile wechseln den Sender, − und + die Lautstärke (höchstens so laut, wie die Eltern erlauben). Ein Schlaf-Timer blendet nach der eingestellten Zeit langsam aus. Mit SD-Karte laufen die Aufnahmen auch ohne Netz |
+| Post | Sprachnachrichten nur mit Kontakten, die die Eltern freigeben (höchstens 4). Oben die Nachrichten an das Kind (antippen spielt ab, das Radio pausiert so lange), unten große Knöpfe für Mama, Papa, … Aufnehmen mit einem großen Knopf, höchstens 30 s, dann „Senden“ oder „Nochmal“. Neue Post meldet Grummel auf dem Dashboard |
+
+Außerdem, ohne eigenes Symbol:
+
+- **Wecker:** zur Weckzeit (Tage wählbar) geht auf dem Gerät die Sonne auf, eine Melodie wird langsam lauter, auch wenn der Ton sonst aus ist und auch bei Sperre. Statt der Melodie geht auch ein Radiosender. Antippen beendet ihn.
+- **Nachtlicht:** in der Schlafenszeit zeigt das Gerät statt schwarz eine sehr dunkle Uhr mit Mond, die langsam wandert (Einbrennschutz).
+- **Uhrzeit** kommt vom Portal und wird in die Echtzeituhr des Boards (PCF85063) geschrieben, so stimmt sie auch nach einem Neustart ohne Netz.
 
 Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestaltungsregeln: ruhige Bilder, nichts blinkt, kurze Runden ohne Zeitdruck, keine Ranglisten, freundliche Rückmeldungen, Ton startet aus.
 
@@ -56,9 +69,10 @@ Jeder Check-in wird mit Uhrzeit (falls bekannt) im NVS gespeichert (`ci0`…`ci2
 
 ```
 core/        plattformunabhängig (C++17): Vektor-Renderer, Schriften, Synthesizer, Klopf-/Schüttel-Erkennung, Launcher
-             radio_player (Radio-Logik, Ringpuffer), portal_net (HTTP über BSD-Sockets), portal_sync (Sperre, Gerätezustand)
+             radio_player (Radio-Logik, Ringpuffer), messages (Sprachnachrichten), portal_net (HTTP über BSD-Sockets),
+             portal_sync (Sperre, Apps, Wecker, Gerätezustand)
 tiles/       home (Dashboard), pet (Haustier-Zustand), checkin, grummel (Büro- und Kinder-Skin), breathe, balance, riddle (Rätsel),
-             album, horses (gezeichnete Pferde), radio, icons, oracle (Erwachsenen-Quiz, nicht in der Reihe)
+             album, horses (gezeichnete Pferde), radio, post, wakeup (Wecker), icons, oracle (Erwachsenen-Quiz, nicht in der Reihe)
 firmware/    Gerät: Rendern auf Kern 1, Display/Eingabe/Audio/Netz auf Kern 0, LittleFS, JPEG, serielle Befehle;
              net.cpp: WLAN, Einrichtungsseite, Portal-Suche per mDNS
 lib/amoled18 Board-Schicht: Pins, Display (CO5300), Touch (CST816), IMU (QMI8658), Audio (ES8311)
@@ -96,6 +110,8 @@ tools/.venv/bin/python tools/portal/portal.py
 
 Dann `http://127.0.0.1:8770` am Mac oder `http://<mac-name>.local:8770` vom Handy. Dort:
 
+- **Post:** Kontakte anlegen, Nachrichten ans Gerät aufnehmen oder hochladen, Nachrichten vom Gerät anhören (neue sind markiert)
+- **Wecker** (Uhrzeit, Tage, Weckton) und **Nachtlicht**
 - **Apps** einzeln an- und abschalten (abgeschaltete verschwinden vom Dashboard und sind auch per Wischen nicht erreichbar)
 - **Sammelalbum:** aktives Thema wählen, eigene Themen anlegen (Titel, Name auf dem Dashboard, Rätselfrage, Überschriften der Rückseite), Karten mit Bild anlegen und bearbeiten. Bilder werden nicht abgeschnitten (Rand unscharf gefüllt, braucht Pillow aus `tools/.venv`). Das Gerät lädt das aktive Thema im WLAN von selbst in seinen Speicher (`/album`, höchstens 48 Karten), neue Themen beginnen bei null Karten
 - **Sperre** aus, „Nur Radio“ oder nach Zeitplan
@@ -115,6 +131,14 @@ Das Portal meldet sich per Bonjour als `_grummel._tcp` an, das Gerät findet es 
 Alles, was das Portal speichert (Aufnahmen, Einstellungen, Spotify-Anmeldung), liegt in `tools/portal/daten/` und nicht im Repository.
 
 Test ohne Gerät: `sim/dksim --portal-test` holt Sender und Kartenthema vom laufenden Portal, spielt den ersten Sender 3 s ab, misst den Ton und zählt die Kartenbilder. Im interaktiven Simulator spielt das Radio über die Mac-Lautsprecher (Portal-Adresse in `DK_PORTAL`, sonst 127.0.0.1).
+
+### SD-Karte (optional)
+
+Das Board hat einen TF-Slot (SDMMC 1-Bit: CLK 2, CMD 1, D0 3). Steckt eine Karte drin (FAT32), kopiert das Gerät alle Aufnahmen aus dem Portal (`/radio`) und die Sprachnachrichten (`/nachricht`) dorthin und spielt sie von der Karte, auch wenn der Mac aus ist. Die Senderliste für den Start ohne Netz liegt in `/radio/quellen.txt`. Spotify geht offline nicht.
+
+### Tonies?
+
+Tonie-Figuren lassen sich nicht abspielen: Das Gerät hat keinen NFC-Leser, und die Inhalte liegen in der Tonie-Cloud, die sie nur an eine Toniebox liefert. Eigene Hörspiele (z. B. von CDs, die ihr besitzt) gehen als Aufnahme über das Portal.
 
 ## Rätsel-Fragen austauschen
 
@@ -157,7 +181,7 @@ tools/.venv/bin/python tools/horses.py upload     # aufs Gerät (LittleFS)
 | `klopf N` | N künstliche Schläge im Abstand von 250 ms |
 | `imu`, `imuraw`, `imureg R V` | Messwerte, Rohregister, Register schreiben (Fehlersuche) |
 | `bench`, `prof` | Rasterzeit je Form, Rechenzeit je Formtyp |
-| `{"time":N}` | Uhrzeit setzen (Unix-Sekunden, Ortszeit) |
+| `{"time":N}` | Uhrzeit setzen (Unix-Sekunden, Ortszeit), stellt auch die Echtzeituhr |
 | `{"file":"begin",…}`, `F <base64>`, `{"file":"end"}` | Datei ins LittleFS schreiben |
 
 ## Stolperfallen auf der Hardware

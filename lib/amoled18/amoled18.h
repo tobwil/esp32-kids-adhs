@@ -32,6 +32,14 @@ I2SClass& i2s();
 
 inline bool bootPressed() { return digitalRead(PIN_BOOT) == LOW; }
 
+// TF-Karte: SDMMC 1-Bit (CLK 2, CMD 1, D0 3, laut Waveshare-Beispiel), eingehängt unter /sd. false = keine Karte
+bool sdBegin();
+
+// Echtzeituhr PCF85063 (I²C 0x51): hält die Ortszeit (Sekunden seit 1970, ohne Zeitzone).
+// rtcRead: false, wenn die Uhr fehlt oder nie gestellt wurde (Oszillator-Stopp-Bit).
+bool rtcRead(int64_t& epoch);
+bool rtcWrite(int64_t epoch);
+
 bool i2cWriteReg(uint8_t addr, uint8_t reg, uint8_t val);
 bool i2cRead(uint8_t addr, uint8_t reg, uint8_t* buf, size_t n);
 

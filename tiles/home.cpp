@@ -34,10 +34,11 @@ float Home::rnd() {
 }
 
 void Home::iconPos(int i, int n, float& x, float& y) {
-  // erste Reihe drei, zweite Reihe der Rest (bei vier etwas enger), jeweils mittig
-  const int row = i < 3 ? 0 : 1, inRow = row ? n - 3 : (n < 3 ? n : 3), k = row ? i - 3 : i;
+  // erste Reihe drei (bei acht Apps vier), zweite Reihe der Rest (bei vier etwas enger), jeweils mittig
+  const int first = n >= 8 ? 4 : 3;
+  const int row = i < first ? 0 : 1, inRow = row ? n - first : (n < first ? n : first), k = row ? i - first : i;
   x = W / 2 + (k - (inRow - 1) * 0.5f) * (inRow > 3 ? 84 : 104);
-  y = row ? 384 : 304;
+  y = row ? 386 : 292;
 }
 
 bool Home::claimsDragAt(float x, float y) const {
@@ -63,6 +64,7 @@ void Home::say(const char* text, float secs, bool ask) {
   snprintf(bubble_, sizeof bubble_, "%s", text);
   bubbleT_ = bubbleDur_ = secs;
   bubbleAsk_ = ask;
+  bubbleTo_ = ask ? checkin_ : -1;
 }
 
 void Home::feed() {
@@ -97,6 +99,18 @@ void Home::tick(const TileInput& in) {
   if (!sleeping) pet_.update(dt);
   R_ = approach(R_, pet_.size() * (growT_ >= 0 ? 1.08f : 1.f), 3, dt);
   if ((saveT_ -= dt) < 0) { saveT_ = 30; pet_.save(store_); }
+
+  // Neue Post: Grummel sagt Bescheid (Tipp auf die Blase öffnet die Post), alle 30 s wieder, solange ungehört
+  postAskT_ -= dt;
+  Message newest;
+  if (msgs_ && postTile_ >= 0 && !(in.disabled >> postTile_ & 1) && pet_.stage != Pet::EGG && bubbleT_ <= 0 && postAskT_ <= 0 && msgs_->newest(newest)) {
+    char b[48];
+    snprintf(b, sizeof b, "Post von %.20s!", newest.from);
+    say(b, 8, true);
+    bubbleTo_ = postTile_;
+    postAskT_ = 30;
+    sqv_ += 2;
+  }
 
   // Ab und zu: ein Wunsch oder „Wie geht's dir?“ (nie vorwurfsvoll)
   if (pet_.stage != Pet::EGG && !sleeping && bubbleT_ <= 0 && (askT_ -= dt) < 0) {
@@ -165,7 +179,7 @@ void Home::tick(const TileInput& in) {
       }
     }
     if (bubbleT_ > 0 && bubbleAsk_ && in.tapY > BUBBLE_Y - 6 && in.tapY < BUBBLE_Y + BUBBLE_H + 8 && std::fabs(in.tapX - W / 2) < bw / 2 + 8) {
-      requestGoto(checkin_);
+      requestGoto(bubbleTo_ >= 0 ? bubbleTo_ : checkin_);
       bubbleT_ = 0;
       return;
     }
@@ -440,6 +454,17 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       s.capsule(x + 6 * K, y + 3 * K, x + 11 * K, y + 3 * K, 1.6f * K, hex(0xfff0c8));
       s.capsule(x + 6 * K, y + 8 * K, x + 11 * K, y + 8 * K, 1.6f * K, hex(0xfff0c8));
       break;
+    case 7: {   // Post: Briefumschlag, Abzeichen bei ungehörter Nachricht
+      s.rrect(x - 17 * K, y - 11 * K, 34 * K, 23 * K, 4 * K, hex(0xfff3d6));
+      s.capsule(x - 15 * K, y - 9 * K, x, y + 2 * K, 1.6f * K, hex(0xc8a070));
+      s.capsule(x + 15 * K, y - 9 * K, x, y + 2 * K, 1.6f * K, hex(0xc8a070));
+      if (msgs_ && msgs_->unheard() > 0) {
+        const float p = 0.8f + 0.2f * std::sin(clock_ * 4);
+        s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 11 * p, hex(0xff7a9a));
+        s.text(fonts::small, "!", x + ICON_R * 0.75f, y - ICON_R * 0.75f - 11, hex(0x2a1a00), 1, Align::Center);
+      }
+      break;
+    }
     default: {   // Sammelalbum: Pferd oder Kartenstapel mit Stern
       static const Horse H = {"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false};
       if (!album_ || album_->horses()) drawHorse(s, H, x - 2 * K, y + 20 * K, 0.36f * K, clock_ * 0.3f);

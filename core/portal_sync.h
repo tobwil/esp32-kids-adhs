@@ -12,9 +12,20 @@ struct PortalSync {
   int mode = -2, from = -1, to = -1;   // zuletzt vom Portal übernommen
   long apps = -2;
   uint32_t nextState = 0;
+  int64_t alarmDay = -1;   // an diesem Tag schon geweckt
 
-  void frame(App& app, RadioPlayer& radio, const char* tile, int stars, uint32_t ms) {
+  void frame(App& app, RadioPlayer& radio, const char* tile, int stars, uint32_t ms, int64_t epoch = 0, int alarmTile = -1) {
     char b[96];
+    app.setNightLight(radio.nightLight);
+    // Wecker: zur eingestellten Minute an den gewählten Tagen (Bit 0 = Montag), einmal pro Tag
+    if (radio.alarmOn && alarmTile >= 0 && epoch > 0) {
+      const int64_t day = epoch / 86400;
+      const int wd = int((day + 3) % 7);   // 1.1.1970 war ein Donnerstag
+      if (int((epoch / 60) % 1440) == radio.alarmMin && (radio.alarmDays >> wd & 1) && day != alarmDay) {
+        alarmDay = day;
+        app.alert(alarmTile);
+      }
+    }
     if (app.takeLockChange()) {   // am Gerät umgestellt: dem Portal melden
       snprintf(b, sizeof b, "/api/sperre?modus=%d", app.lockMode());
       radio.queueAction(b);

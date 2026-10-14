@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Eltern-Portal fürs Heimnetz: Radio-Sender (eigene Aufnahmen, Spotify-Playlists), Sperre, Lautstärke, Schlaf-Timer.
 
-  tools/.venv/bin/python tools/portal/portal.py [--port 8770]
+  tools/.venv/bin/python tools/portal/portal.py [--port 8770] [--daten <ordner>]
 
 Dann im Browser am Mac: http://127.0.0.1:8770 (Spotify-Anmeldung geht nur dort), vom Handy: http://<mac-name>.local:8770
 
@@ -32,8 +32,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "daten")
+if "--daten" in sys.argv:   # anderer Datenordner (z. B. für eine Vorführung)
+    DATA = os.path.abspath(sys.argv[sys.argv.index("--daten") + 1])
 REC = os.path.join(DATA, "aufnahmen")
 ALBEN = os.path.join(DATA, "alben")
+POST = os.path.join(DATA, "nachrichten")
+POST_INDEX = os.path.join(POST, "index.json")
 CONFIG = os.path.join(DATA, "einstellungen.json")
 TOKENS = os.path.join(DATA, "spotify.json")
 RATE = 16000                      # wie Synth::RATE auf dem Gerät
@@ -42,10 +46,12 @@ SCOPES = "user-read-playback-state user-modify-playback-state playlist-read-priv
 
 os.makedirs(REC, exist_ok=True)
 os.makedirs(ALBEN, exist_ok=True)
+os.makedirs(POST, exist_ok=True)
 sys.path.insert(0, os.path.dirname(HERE))   # tools/: Bildfunktionen aus horses.py
 
 # Kacheln auf dem Gerät (Index wie in firmware/main.cpp), für „Apps an/aus“
-APPS = [(1, "Wie geht's dir?"), (2, "Grummel"), (3, "Atmen"), (4, "Kugel ins Loch"), (5, "Sammelalbum"), (6, "Rätsel"), (7, "Radio")]
+APPS = [(1, "Wie geht's dir?"), (2, "Grummel"), (3, "Atmen"), (4, "Kugel ins Loch"), (5, "Sammelalbum"), (6, "Rätsel"), (7, "Radio"), (8, "Post")]
+MAX_CONTACTS = 4
 MAX_CARDS = 48
 lock = threading.RLock()
 
@@ -59,7 +65,8 @@ except ImportError:
 # ---------------- Einstellungen ----------------
 
 DEFAULT = {"sperre": {"modus": 0, "von": 19 * 60 + 30, "bis": 7 * 60}, "laut": 70, "schlaf": 30,
-           "zufall": True, "quellen": [], "spotify": {"client_id": ""}, "apps_aus": 0, "album": "pferde"}
+           "zufall": True, "quellen": [], "spotify": {"client_id": ""}, "apps_aus": 0, "album": "pferde",
+           "kontakte": [], "wecker": {"an": False, "min": 7 * 60, "tage": 0x1F, "ton": "melodie"}, "nachtlicht": False}
 
 
 def load_config():
@@ -272,6 +279,18 @@ def device_reply():
         for s in cfg["quellen"]:
             lines.append(f"quelle {s['id']} {s['art']} {s['name']}")
         lines.append(f"apps {int(cfg.get('apps_aus', 0))}")
+        w = cfg["wecker"]
+        lines.append(f"wecker {1 if w['an'] else 0} {w['min']} {w['tage']} {w['ton'] or 'melodie'}")
+        lines.append(f"nacht {1 if cfg.get('nachtlicht') else 0}")
+        for s in cfg["quellen"]:   # Aufnahmen für die Offline-Bibliothek auf der SD-Karte
+            p = os.path.join(REC, s["id"] + ".pcm")
+            if s["art"] == "aufnahme" and os.path.exists(p):
+                lines.append(f"datei {s['id']} {os.path.getsize(p)}")
+        for k in cfg["kontakte"]:
+            lines.append(f"kontakt {k['id']} {k['name']}")
+        names = {k["id"]: k["name"] for k in cfg["kontakte"]}
+        for m in [m for m in post_index() if m["richtung"] == "an_kind"][:6]:   # neueste zuerst
+            lines.append(f"nachricht {m['id']} {1 if m.get('gehoert') else 0} {names.get(m['kontakt'], 'Eltern')}")
         aid = cfg.get("album", "pferde")
         lines.append(f"album {aid} {album_version(aid):08x}" if aid != "pferde" else "album pferde 0")
         hint = spotify_hint
@@ -406,6 +425,38 @@ def card_rgb(aid, kid, thumb):
     return to_rgb565(im)
 
 
+# ---------------- Sprachnachrichten ----------------
+# nachrichten/<id>.pcm (16 kHz mono) und index.json: [{id, richtung: an_kind|vom_kind, kontakt, zeit, gehoert}], neueste zuerst
+
+def post_index():
+    try:
+        with open(POST_INDEX, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def post_save(idx):
+    with open(POST_INDEX, "w", encoding="utf-8") as f:
+        json.dump(idx[:60], f, ensure_ascii=False, indent=1)   # die letzten 60 behalten
+
+
+def post_add(richtung, kontakt, pcm):
+    idx = post_index()
+    n = max([int(m["id"][1:]) for m in idx if m["id"][1:].isdigit()] + [0]) + 1
+    mid = f"n{n}"
+    with open(os.path.join(POST, mid + ".pcm"), "wb") as f:
+        f.write(pcm)
+    idx.insert(0, {"id": mid, "richtung": richtung, "kontakt": kontakt, "zeit": int(time.time()), "gehoert": False,
+                   "sekunden": round(len(pcm) / 2 / RATE, 1)})
+    for m in idx[60:]:   # alte Dateien aufräumen
+        p = os.path.join(POST, m["id"] + ".pcm")
+        if os.path.exists(p):
+            os.remove(p)
+    post_save(idx)
+    return mid
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "GrummelPortal/1"
@@ -450,6 +501,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, device_reply())
             if u.path == "/api/radio":
                 return self.radio_action(q)
+            if u.path == "/api/nachricht/gehoert":   # das Kind hat sie angehört
+                with lock:
+                    idx = post_index()
+                    for m in idx:
+                        if m["id"] == q.get("id") and m["richtung"] == "an_kind":
+                            m["gehoert"] = True
+                    post_save(idx)
+                return self.send(200, "ok\n")
+            m = re.fullmatch(r"/nachricht/(n\d+)\.(pcm|wav)", u.path)
+            if m:
+                with open(os.path.join(POST, m.group(1) + ".pcm"), "rb") as f:
+                    pcm = f.read()
+                if m.group(2) == "wav":
+                    return self.send(200, wav_header(len(pcm)) + pcm, "audio/wav")
+                return self.send(200, pcm, "application/octet-stream")
             if u.path == "/api/apps":   # am Gerät umgestellt
                 with lock:
                     cfg["apps_aus"] = int(q.get("aus", 0)) & 0xFE
@@ -515,6 +581,19 @@ class Handler(BaseHTTPRequestHandler):
                                            "sekunden": round(len(pcm) / 2 / RATE)})
                     save_config()
                 return self.json({"ok": True, "id": sid})
+            if u.path == "/api/nachricht":   # vom Gerät: Aufnahme des Kindes (16 kHz mono PCM)
+                pcm = self.body()
+                with lock:
+                    post_add("vom_kind", re.sub(r"[^a-z0-9]", "", q.get("an", ""))[:8], pcm)
+                return self.send(200, "ok\n")
+            if u.path == "/api/nachricht/senden":   # von den Eltern ans Kind
+                pcm = convert(self.body(), "." + re.sub(r"[^a-z0-9]", "", q.get("typ", "webm"))[:5])
+                with lock:
+                    kid = q.get("von", "")
+                    if not any(k["id"] == kid for k in cfg["kontakte"]):
+                        raise RuntimeError("Bitte auswählen, von wem die Nachricht ist")
+                    mid = post_add("an_kind", kid, pcm)
+                return self.json({"ok": True, "id": mid})
             if u.path == "/api/album/bild":
                 raw = self.body()
                 jpg, _ = card_image(raw)
@@ -538,7 +617,35 @@ class Handler(BaseHTTPRequestHandler):
                     if "zufall" in data:
                         cfg["zufall"] = bool(data["zufall"])
                     if "apps_aus" in data:
-                        cfg["apps_aus"] = int(data["apps_aus"]) & 0xFE
+                        cfg["apps_aus"] = int(data["apps_aus"]) & 0x1FE
+                    if "nachtlicht" in data:
+                        cfg["nachtlicht"] = bool(data["nachtlicht"])
+                    if "wecker" in data:
+                        w = data["wecker"]
+                        ton = w.get("ton") or "melodie"
+                        if ton != "melodie" and not find_source(ton):
+                            ton = "melodie"
+                        cfg["wecker"] = {"an": bool(w.get("an")), "min": int(w.get("min", 420)) % 1440, "tage": int(w.get("tage", 0x1F)) & 0x7F, "ton": ton}
+                elif u.path == "/api/kontakt":
+                    if len(cfg["kontakte"]) >= MAX_CONTACTS:
+                        raise RuntimeError(f"Höchstens {MAX_CONTACTS} Kontakte")
+                    used = {k["id"] for k in cfg["kontakte"]}
+                    kid = next(f"k{i}" for i in range(1, 99) if f"k{i}" not in used)
+                    cfg["kontakte"].append({"id": kid, "name": clean_name(data.get("name"), 16)})
+                elif u.path == "/api/kontakt/loeschen":
+                    cfg["kontakte"] = [k for k in cfg["kontakte"] if k["id"] != data.get("id")]
+                elif u.path == "/api/nachricht/loeschen":
+                    idx = [m for m in post_index() if m["id"] != data.get("id")]
+                    post_save(idx)
+                    p = os.path.join(POST, re.sub(r"[^a-z0-9]", "", data.get("id", "")) + ".pcm")
+                    if os.path.exists(p):
+                        os.remove(p)
+                elif u.path == "/api/nachricht/gelesen":   # Eltern haben eine Nachricht des Kindes angehört
+                    idx = post_index()
+                    for m in idx:
+                        if m["id"] == data.get("id"):
+                            m["gehoert"] = True
+                    post_save(idx)
                 elif u.path == "/api/album/speichern":
                     aid = data.get("id") or slug(data.get("symbol") or data.get("titel", ""))
                     a = album_load(aid) if data.get("id") else None
@@ -684,6 +791,7 @@ class Handler(BaseHTTPRequestHandler):
                     "sperre": cfg["sperre"], "laut": cfg["laut"], "schlaf": cfg["schlaf"], "zufall": cfg.get("zufall", True),
                     "quellen": cfg["quellen"],
                     "apps": [{"index": i, "name": n, "an": not (int(cfg.get("apps_aus", 0)) >> i & 1)} for i, n in APPS],
+                    "kontakte": cfg["kontakte"], "nachrichten": post_index()[:30], "wecker": cfg["wecker"], "nachtlicht": cfg.get("nachtlicht", False),
                     "spotify": {"client_id": cfg["spotify"]["client_id"], "verbunden": bool(t.get("refresh_token")),
                                 "librespot": audio.status, "hinweis": spotify_hint},
                     "uhr": time.strftime("%H:%M")}

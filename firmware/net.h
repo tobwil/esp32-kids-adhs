@@ -8,7 +8,8 @@
 #include "app.h"
 #include "radio_player.h"
 
-void netBegin(dk::RadioPlayer* radio);
+// sd: TF-Karte eingehängt (Offline-Bibliothek: Aufnahmen und Nachrichten werden dorthin kopiert)
+void netBegin(dk::RadioPlayer* radio, dk::Messages* msgs, bool sd);
 dk::SystemMenu* netMenu();
 void netStatus(char* out, int n);   // für den seriellen Befehl „status“
 // Sammelalbum: true = ein Thema aus dem Portal liegt in /album (sonst die eingebauten Pferde)

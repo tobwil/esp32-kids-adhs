@@ -1,6 +1,9 @@
 #include "amoled18.h"
 
+#include <SD_MMC.h>
 #include <Wire.h>
+
+#include <ctime>
 
 #include "es8311.h"
 
@@ -108,6 +111,48 @@ bool audioBegin(uint32_t rate, int volume) {
   es8311_microphone_config(es, false);              // analoges Mikrofon
   es8311_microphone_gain_set(es, ES8311_MIC_GAIN_24DB);
   return true;
+}
+
+// ---------------- TF-Karte ----------------
+
+bool sdBegin() {
+  SD_MMC.setPins(2, 1, 3);
+  if (!SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, 5)) return false;
+  return SD_MMC.cardType() != CARD_NONE;
+}
+
+// ---------------- Echtzeituhr PCF85063 ----------------
+
+static constexpr uint8_t RTC_ADDR = 0x51;
+static inline uint8_t bcd2bin(uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
+static inline uint8_t bin2bcd(int v) { return uint8_t(((v / 10) << 4) | (v % 10)); }
+
+bool rtcRead(int64_t& epoch) {
+  uint8_t r[7];
+  if (!i2cRead(RTC_ADDR, 0x04, r, 7)) return false;
+  if (r[0] & 0x80) return false;   // Oszillator stand still: Zeit ungültig
+  tm t{};
+  t.tm_sec = bcd2bin(r[0] & 0x7F);
+  t.tm_min = bcd2bin(r[1] & 0x7F);
+  t.tm_hour = bcd2bin(r[2] & 0x3F);
+  t.tm_mday = bcd2bin(r[3] & 0x3F);
+  t.tm_mon = bcd2bin(r[5] & 0x1F) - 1;
+  t.tm_year = bcd2bin(r[6]) + 100;
+  if (t.tm_year < 124) return false;   // vor 2024: nie gestellt
+  epoch = int64_t(mktime(&t));        // ohne gesetzte Zeitzone rechnet mktime in UTC, die Uhr hält Ortszeit
+  return true;
+}
+
+bool rtcWrite(int64_t epoch) {
+  const time_t tt = time_t(epoch);
+  tm t{};
+  gmtime_r(&tt, &t);
+  const uint8_t v[7] = {bin2bcd(t.tm_sec), bin2bcd(t.tm_min), bin2bcd(t.tm_hour), bin2bcd(t.tm_mday), uint8_t(t.tm_wday),
+                        bin2bcd(t.tm_mon + 1), bin2bcd(t.tm_year - 100)};
+  Wire.beginTransmission(RTC_ADDR);
+  Wire.write(0x04);
+  Wire.write(v, 7);
+  return Wire.endTransmission() == 0;
 }
 
 }  // namespace amoled18

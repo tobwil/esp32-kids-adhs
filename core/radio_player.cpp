@@ -73,6 +73,7 @@ void RadioPlayer::play() {
 
 void RadioPlayer::stop() {
   std::lock_guard<std::mutex> g(mu_);
+  resume_ = false;
   if (!playing_) return;
   playing_ = false;
   sleepLeft_ = 0;
@@ -84,6 +85,35 @@ void RadioPlayer::stop() {
 void RadioPlayer::skip() {
   std::lock_guard<std::mutex> g(mu_);
   queue("/api/radio?aktion=weiter");
+}
+
+void RadioPlayer::playClip(const char* path) {
+  std::lock_guard<std::mutex> g(mu_);
+  if (!clip_) resume_ = playing_;
+  bool sp = false;
+  for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) sp = src_[i].spotify;
+  if (playing_ && sp) queue("/api/radio?aktion=pause");   // Spotify anhalten, das Hörspiel wartet
+  snprintf(clipPath_, sizeof clipPath_, "%s", path);
+  clip_ = true;
+  playing_ = false;
+  fade_ = 1;
+  gen_++;
+  ring.clear();
+}
+
+void RadioPlayer::stopClip() {
+  std::lock_guard<std::mutex> g(mu_);
+  if (!clip_) return;
+  clip_ = false;
+  gen_++;
+  ring.clear();
+  if (resume_) {   // weiter mit dem Radio
+    playing_ = true;
+    bool sp = false;
+    for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) sp = src_[i].spotify;
+    if (sp) queue("/api/radio?aktion=play&quelle=%s", cur_);
+  }
+  resume_ = false;
 }
 
 void RadioPlayer::setVolume(int v) {
@@ -103,7 +133,7 @@ void RadioPlayer::tick(float dt) {
   }
   if (vol_ > maxVol_) vol_ = maxVol_;
   const float v = vol_ / 100.f;
-  gain_.store(playing_ ? v * v * fade_ : 0);
+  gain_.store(playing_ || clip_ ? v * v * (clip_ ? 1.f : fade_) : 0);
 }
 
 void RadioPlayer::mix(int16_t* mono, int n) {
@@ -133,8 +163,9 @@ void RadioPlayer::mix(int16_t* mono, int n) {
 void RadioPlayer::parse(const char* text) {
   std::lock_guard<std::mutex> g(mu_);
   RadioSource fresh[MAX_SOURCES];
-  int n = 0;
+  int n = 0, nf = 0;
   hint_[0] = 0;
+  if (msgs_) msgs_->beginParse();
   for (const char* p = text; *p;) {
     const char* e = std::strchr(p, '\n');
     const int len = e ? int(e - p) : int(std::strlen(p));
@@ -150,6 +181,17 @@ void RadioPlayer::parse(const char* text) {
     else if (!std::strcmp(line, "schlaf")) sleepMin = std::atoi(rest);
     else if (!std::strcmp(line, "hinweis")) snprintf(hint_, sizeof hint_, "%s", rest);
     else if (!std::strcmp(line, "apps")) appsOff = std::atol(rest);
+    else if (!std::strcmp(line, "nacht")) nightLight = std::atoi(rest) != 0;
+    else if (!std::strcmp(line, "wecker")) {
+      int on = 0;
+      char tone[32] = "melodie";
+      if (std::sscanf(rest, "%d %d %d %31s", &on, &alarmMin, &alarmDays, tone) >= 3) { alarmOn = on != 0; snprintf(alarmTone, sizeof alarmTone, "%s", tone); }
+    } else if (!std::strcmp(line, "datei") && nf < MAX_FILES) {
+      char id[32];
+      long b = 0;
+      if (std::sscanf(rest, "%31s %ld", id, &b) == 2) { snprintf(files[nf].id, sizeof files[nf].id, "%s", id); files[nf++].bytes = b; }
+    }
+    else if (msgs_ && msgs_->parseLine(line, rest)) {}
     else if (!std::strcmp(line, "album")) {
       char t[24] = "";
       unsigned long v = 0;
@@ -171,6 +213,8 @@ void RadioPlayer::parse(const char* text) {
   }
   std::memcpy(src_, fresh, sizeof(RadioSource) * n);
   n_ = n;
+  nFiles = nf;
+  if (msgs_) msgs_->endParse();
   bool found = false;
   for (int i = 0; i < n_; i++) found |= !std::strcmp(src_[i].id, cur_);
   if (!found && cur_[0]) { cur_[0] = 0; if (playing_) { playing_ = false; gen_++; } }   // Sender wurde im Portal entfernt
@@ -203,6 +247,7 @@ bool RadioPlayer::takeAction(char* out, int n) {
 uint32_t RadioPlayer::wantedStream(char* path, int n) {
   std::lock_guard<std::mutex> g(mu_);
   path[0] = 0;
+  if (clip_) { snprintf(path, n, "%s", clipPath_); return gen_; }
   if (playing_ && cur_[0]) {
     bool sp = false;
     for (int i = 0; i < n_; i++) if (!std::strcmp(src_[i].id, cur_)) sp = src_[i].spotify;
@@ -213,8 +258,12 @@ uint32_t RadioPlayer::wantedStream(char* path, int n) {
 }
 
 void RadioPlayer::streamEnded(uint32_t gen) {
-  std::lock_guard<std::mutex> g(mu_);
-  if (gen == gen_ && playing_) { playing_ = false; gen_++; }   // Aufnahme ist zu Ende
+  {
+    std::lock_guard<std::mutex> g(mu_);
+    if (gen != gen_) return;
+    if (!clip_) { if (playing_) { playing_ = false; gen_++; } return; }   // Aufnahme ist zu Ende
+  }
+  stopClip();   // Nachricht zu Ende: Radio läuft weiter, falls es lief
 }
 
 }  // namespace dk

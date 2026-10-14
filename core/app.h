@@ -31,7 +31,7 @@ class App {
   void tick(const Input& in);
   void draw(Scene& s);
   int brightness() const { return bright_; }   // gewünschte Panel-Helligkeit 0..255
-  bool screenOff() const { return off_; }
+  bool screenOff() const { return off_ && !night_; }   // Nachtlicht: Bildschirm bleibt (sehr dunkel) an
   const char* debug();
   Motion motion;
 
@@ -58,6 +58,12 @@ class App {
 
   // Apps an/aus (Eltern): Bit je Kachel-Index, abgeschaltete sind weder sichtbar noch erreichbar. Gespeichert als „app_aus“.
   void setDisabled(uint32_t mask);
+  // Nachtlicht: in der Schlafenszeit (Sperr-Zeitfenster) statt schwarz eine sehr dunkle Uhr mit Mond
+  void setNightLight(bool on) { nightLight_ = on; }
+  // Kachel sofort zeigen, auch bei Sperre oder abgeschaltet (Wecker), Bildschirm an
+  void alert(int tile);
+  // nie per Wischen oder in „Apps an/aus“ (z. B. der Wecker, der nur über alert() kommt)
+  void setHidden(uint32_t mask) { hidden_ = mask; }
   uint32_t disabled() const { return disabled_; }
   bool takeAppsChange() { const bool d = appsDirty_; appsDirty_ = false; return d; }
 
@@ -116,8 +122,14 @@ class App {
   int lockTile_ = -1, lockMode_ = 0, lockFrom_ = 19 * 60 + 30, lockTo_ = 7 * 60;
   bool locked_ = false, lockDirty_ = false;
   uint32_t disabled_ = 0;
+  bool nightLight_ = false, night_ = false;
+  int alertTile_ = -1;
+  int64_t epoch_ = 0;
+  bool inSleepWindow() const;
+  void drawNight(Scene& s);
   bool appsDirty_ = false;
-  bool enabled(int i) const { return i == home_ || !(disabled_ >> i & 1); }
+  uint32_t hidden_ = 0;
+  bool enabled(int i) const { return i == home_ || !((disabled_ | hidden_) >> i & 1); }
   void updateLock(int64_t epoch);
   float orbX_ = 0, orbY_ = 0;
   char dbg_[160];

@@ -9,7 +9,7 @@
 
 namespace dk {
 
-static constexpr int BRIGHT[3] = {200, 120, 60}, BRIGHT_DIM = 40;
+static constexpr int BRIGHT[3] = {200, 120, 60}, BRIGHT_DIM = 40, NIGHT_BRIGHT = 12;
 static constexpr uint32_t LOCKED_HOLD_MS = 8000;   // bei Sperre länger halten, bis die Einstellungen kommen
 static constexpr float LIST_Y0 = 76, LIST_Y1 = H - 10, PILL_H = 50, ROW_GAP = 10, HEAD_H = 34, INFO_H = 26;
 static constexpr float TRANS_OUT = 0.12f, TRANS_IN = 0.18f;   // s
@@ -68,22 +68,35 @@ void App::setDisabled(uint32_t mask) {
   if (!locked_ && !enabled(cur_)) go(Tile::GOTO_HOME);   // offene App wurde abgeschaltet
 }
 
+bool App::inSleepWindow() const {
+  if (epoch_ <= 0) return false;
+  const int m = int((epoch_ / 60) % 1440);
+  return lockFrom_ < lockTo_ ? (m >= lockFrom_ && m < lockTo_) : (m >= lockFrom_ || m < lockTo_);
+}
+
+void App::alert(int tile) {
+  if (tile < 0 || tile >= int(tiles_.size())) return;
+  alertTile_ = tile;
+  lastAct_ = ms_;
+  if (off_) { off_ = false; show(tile); }
+  else go(tile);
+}
+
 void App::updateLock(int64_t epoch) {
+  epoch_ = epoch;
   bool on = lockTile_ >= 0 && lockMode_ == 1;
-  if (lockTile_ >= 0 && lockMode_ == 2 && epoch > 0) {
-    const int m = int((epoch / 60) % 1440);
-    on = lockFrom_ < lockTo_ ? (m >= lockFrom_ && m < lockTo_) : (m >= lockFrom_ || m < lockTo_);
-  }
+  if (lockTile_ >= 0 && lockMode_ == 2) on = inSleepWindow();
   if (on == locked_) return;
   locked_ = on;
-  if (on) { if (cur_ != lockTile_) go(lockTile_); }
+  if (on) { if (cur_ != lockTile_ && cur_ != alertTile_) go(lockTile_); }
   else if (cur_ == lockTile_) go(Tile::GOTO_HOME);
 }
 
 void App::go(int target) {
   bool returning = false;
-  if (locked_) {   // gesperrt: nur zur erlaubten Kachel
-    if (target != lockTile_ || cur_ == lockTile_) return;
+  if (locked_) {   // gesperrt: nur zur erlaubten Kachel (und zum Wecker)
+    if (target == Tile::GOTO_HOME || target == Tile::GOTO_BACK) target = lockTile_;
+    if ((target != lockTile_ && target != alertTile_) || cur_ == target) return;
     for (int& b : back_) b = -1;
     transTo_ = target; transReturning_ = false; trans_ = 0.0001f;
     return;
@@ -95,7 +108,7 @@ void App::go(int target) {
   } else if (target >= 0 && target < int(tiles_.size()) && target != home_) {
     back_[target] = cur_;   // merken, wer die App geöffnet hat
   }
-  if (target < 0 || target >= int(tiles_.size()) || target == cur_ || !enabled(target)) return;
+  if (target < 0 || target >= int(tiles_.size()) || target == cur_ || (!enabled(target) && target != alertTile_)) return;
   if (target == home_) for (int& b : back_) b = -1;
   transTo_ = target;
   transReturning_ = returning;
@@ -133,7 +146,7 @@ int App::settingsRows(Row* out, int cap) const {
   add(R_BRIGHT, 0);
   if (lockTile_ >= 0) add(R_LOCK, 0);
   add(R_HEAD, 3);
-  for (int i = 0; i < int(tiles_.size()); i++) if (i != home_) add(R_APP, i);
+  for (int i = 0; i < int(tiles_.size()); i++) if (i != home_ && !(hidden_ >> i & 1)) add(R_APP, i);
   if (sys_ && sys_->count()) { add(R_HEAD, 2); for (int i = 0; i < sys_->count(); i++) add(R_SYS, i); }
   add(R_DONE, 0);
   return n;
@@ -345,7 +358,8 @@ void App::tick(const Input& in) {
   const uint32_t idle = in.ms - lastAct_;
   off_ = idle > offMs_;
   dim_ = !off_ && idle > dimMs_;
-  bright_ = off_ ? 0 : dim_ ? std::min(BRIGHT_DIM, BRIGHT[brightLevel_]) : BRIGHT[brightLevel_];
+  night_ = off_ && nightLight_ && inSleepWindow();
+  bright_ = night_ ? NIGHT_BRIGHT : off_ ? 0 : dim_ ? std::min(BRIGHT_DIM, BRIGHT[brightLevel_]) : BRIGHT[brightLevel_];
   // alle 60 s wandert das Bild um ein paar Pixel auf einer kleinen Kreisbahn
   const float ph = float((in.ms / 60000) % 8) * (TAU / 8);
   orbX_ += (3.f * std::cos(ph) - orbX_) * std::fmin(1.f, dt_ * 0.5f);
@@ -355,6 +369,7 @@ void App::tick(const Input& in) {
 
 void App::draw(Scene& s) {
   s.reset();
+  if (night_) { drawNight(s); return; }
   if (off_) return;
   // nach einem Wisch: altes Bild gleitet weiter hinaus, das neue kommt von der anderen Seite
   float slide = 0;
@@ -366,6 +381,19 @@ void App::draw(Scene& s) {
   tiles_[cur_]->draw(s);
   s.fade = 1;
   if (settingsA_ > 0.02f) drawSettings(s);
+}
+
+// Nachtlicht: Uhr und Mond, sehr dunkel; wandert mit der Zeit über den Bildschirm (Einbrennschutz)
+void App::drawNight(Scene& s) {
+  const int m = int((epoch_ / 60) % 1440);
+  const float dx = 50 * std::sin(m * 0.13f), dy = 90 * std::sin(m * 0.071f);
+  const float cx = W / 2 + dx, cy = H / 2 + dy;
+  const Col c = hex(0x8a7ad0);
+  s.circle(cx, cy - 74, 20, hex(0xfff0c8), 0.8f);
+  s.circle(cx + 9, cy - 80, 17, hex(0x000000));
+  char b[8];
+  snprintf(b, sizeof b, "%d:%02d", m / 60, m % 60);
+  s.text(fonts::big, b, cx, cy - 34, c, 1, Align::Center);
 }
 
 void App::drawSettings(Scene& s) {

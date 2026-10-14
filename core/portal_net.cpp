@@ -109,10 +109,40 @@ bool portalDownload(const char* host, int port, const char* path, bool (*sink)(v
   return ok;
 }
 
-bool portalPoll(RadioPlayer& p, const char* host, int port) {
+bool portalPost(const char* host, int port, const char* path, const uint8_t* data, int len) {
+  const int fd = connectTo(host, port, 1500);
+  if (fd < 0) return false;
+  timeval st{5, 0};
+  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof st);
+  char req[320];
+  const int n = snprintf(req, sizeof req, "POST %s HTTP/1.0\r\nHost: %s\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
+                         path, host, len);
+  bool ok = send(fd, req, n, 0) == n;
+  for (int off = 0; ok && off < len;) {
+    const int r = int(send(fd, data + off, len - off < 4096 ? len - off : 4096, 0));
+    if (r <= 0) ok = false;
+    else off += r;
+  }
+  char resp[64] = "";
+  if (ok) {
+    timeval rt{10, 0};   // das Portal wandelt erst um, dann antwortet es
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof rt);
+    const int r = int(recv(fd, resp, sizeof resp - 1, 0));
+    ok = r > 12 && !std::strncmp(resp + 9, "200", 3);
+  }
+  close(fd);
+  return ok;
+}
+
+bool portalPoll(RadioPlayer& p, Messages* m, const char* host, int port) {
   char path[256], body[4096];
   bool ok = true;
   while (ok && p.takeAction(path, sizeof path)) ok = fetch(host, port, path, body, sizeof body);
+  while (ok && m && m->takeAction(path, sizeof path)) ok = fetch(host, port, path, body, sizeof body);
+  const int16_t* rec;
+  int samples;
+  if (ok && m && m->takeUpload(path, sizeof path, &rec, &samples))
+    m->uploadDone(portalPost(host, port, path, reinterpret_cast<const uint8_t*>(rec), samples * 2));
   p.stateQuery(path, sizeof path);
   ok = ok && fetch(host, port, path, body, sizeof body);
   if (ok) p.parse(body);
@@ -120,13 +150,29 @@ bool portalPoll(RadioPlayer& p, const char* host, int port) {
   return ok;
 }
 
-void portalStreamLoop(RadioPlayer& p, const char* (*host)(), int port) {
+void portalStreamLoop(RadioPlayer& p, const char* (*host)(), int port, LocalFiles* local) {
   static char extra[1024];
   int16_t pcm[512];
   for (;;) {
     char path[64];
     const uint32_t gen = p.wantedStream(path, sizeof path);
     if (!path[0]) { sleepMs(50); continue; }
+    if (local && local->open(path)) {   // von der SD-Karte, auch ohne Netz
+      uint8_t buf[1024];
+      bool ended = false;
+      while (p.wantedStream(path, sizeof path) == gen) {
+        if (p.ring.space() < 512) { sleepMs(20); continue; }
+        const int r = local->read(buf, sizeof buf) & ~1;
+        if (r <= 0) { ended = true; break; }
+        p.ring.write(reinterpret_cast<int16_t*>(buf), r / 2);
+      }
+      local->close();
+      if (ended) {
+        while (p.ring.fill() > 0 && p.wantedStream(path, sizeof path) == gen) sleepMs(50);
+        p.streamEnded(gen);
+      }
+      continue;
+    }
     int n = 0;
     const int fd = httpGet(host(), port, path, extra, n);
     if (fd < 0) { sleepMs(1000); continue; }

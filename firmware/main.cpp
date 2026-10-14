@@ -15,7 +15,7 @@
 //   {"file":"begin","path":"/pferde/3.jpg","size":N}, dann „F <base64>“ (je ≤ 512 Byte), dann {"file":"end"}
 //                  Datei ins LittleFS schreiben (tools/horses.py upload); {"album":"reload"} lädt Karten und Fotos neu
 //   klopf N        N künstliche Schläge im Abstand von 250 ms (Test ohne Tisch)
-//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio)
+//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Sammelalbum, 6 Rätsel, 7 Radio, 8 Post, 9 Wecker)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   wisch X0 Y0 X1 Y1  Wischen von X0, Y0 nach X1, Y1
 //   boot           BOOT-Taste drücken (Einstellungen auf/zu)
@@ -42,7 +42,9 @@
 #include "net.h"
 #include "portal_sync.h"
 #include "quiz_kids.h"
+#include "post.h"
 #include "radio.h"
+#include "wakeup.h"
 #include "rewards.h"
 #include "riddle.h"
 #include "fonts.h"
@@ -72,11 +74,14 @@ static Synth synth;
 static NvsStore store;
 static App* app;
 static Scene scene;
-// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio.
-enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO };
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Sammelalbum, 6 Rätsel, 7 Radio, 8 Post,
+// 9 Wecker (versteckt, kommt nur zur Weckzeit)
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO, T_POST, T_WAKE };
 static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3},
-                                     {"Pferde", T_ALBUM, 4},    {"Rätsel", T_RIDDLE, 5},    {"Radio", T_RADIO, 6}};
+                                     {"Pferde", T_ALBUM, 4},    {"Rätsel", T_RIDDLE, 5},    {"Radio", T_RADIO, 6},  {"Post", T_POST, 7}};
 static RadioPlayer* radioPlayer = nullptr;   // im PSRAM (Ringpuffer 64 KB)
+static Messages* messages = nullptr;         // Aufnahmepuffer 30 s im PSRAM
+static bool sdOk = false, rtcOk = false;
 static PortalSync portalSync;
 static Home* home;
 static bool fsOk = false;
@@ -331,7 +336,9 @@ static void micTask(void*) {
     const size_t n = hw::i2s().readBytes(reinterpret_cast<char*>(buf), sizeof buf) / 4;
     if (!n) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
     double sum = 0;
-    for (size_t i = 0; i < n; i++) { const float v = buf[2 * i]; sum += double(v) * v; }
+    static int16_t mono[256];
+    for (size_t i = 0; i < n; i++) { const float v = buf[2 * i]; sum += double(v) * v; mono[i] = buf[2 * i]; }
+    if (messages) messages->feed(mono, int(n));   // nimmt nur auf, wenn die Post-Kachel aufnimmt
     const float db = 10 * log10f(float(sum / n) + 1e-3f) - 90.3f;   // dBFS
     micDb = db;
     // Grundgeräusch langsam nachführen, Sprache = deutlich darüber
@@ -450,6 +457,9 @@ static void pollSerial() {
       char ns[160];
       netStatus(ns, sizeof ns);
       Serial.printf("%s, sender %d, %s\n", ns, radioPlayer->count(), radioPlayer->playing() ? "spielt" : "still");
+      Serial.printf("sd %s, uhr %s, post %d (%d neu), kontakte %d, wecker %s %d:%02d, nachtlicht %s\n", sdOk ? "ja" : "nein", rtcOk ? "ok" : "nicht gestellt",
+                    messages->count(), messages->unheard(), messages->contacts(), radioPlayer->alarmOn ? "an" : "aus", radioPlayer->alarmMin / 60,
+                    radioPlayer->alarmMin % 60, radioPlayer->nightLight ? "an" : "aus");
     } else if (!strncmp(line, "imureg ", 7)) {   // Testweise ein IMU-Register schreiben: imureg <reg hex> <wert hex>
       unsigned reg = 0, val = 0;
       if (sscanf(line + 7, "%x %x", &reg, &val) == 2) { hw::i2cWriteReg(0x6B, uint8_t(reg), uint8_t(val)); Serial.printf("imureg %02X = %02X\n", reg, val); }
@@ -489,7 +499,11 @@ static void pollSerial() {
     else if (!strncmp(line, "klopf", 5)) { fakeKnocks = atoi(line + 5) > 0 ? atoi(line + 5) : 1; fakeNext = millis(); }
     else if (const char* p = strstr(line, "\"time\":")) {
       const int64_t t = atoll(p + 7);
-      if (t > 1600000000) { epochBase = t - millis() / 1000; Serial.printf("zeit gesetzt %lld\n", (long long)t); }
+      if (t > 1600000000) {
+        epochBase = t - millis() / 1000;
+        rtcOk = hw::rtcWrite(t);   // auch die Echtzeituhr stellen
+        Serial.printf("zeit gesetzt %lld, uhr %s\n", (long long)t, rtcOk ? "gestellt" : "fehlt");
+      }
     }
   }
 }
@@ -507,6 +521,13 @@ void setup() {
   Serial.printf("Audio %s\n", audio ? "ok" : "fehlt");
 
   store.begin();
+  sdOk = hw::sdBegin();
+  Serial.printf("SD-Karte %s\n", sdOk ? "ok" : "fehlt");
+  {
+    int64_t t = 0;
+    rtcOk = hw::rtcRead(t);
+    if (rtcOk) { epochBase = t - millis() / 1000; Serial.printf("Uhr: %lld\n", (long long)t); }
+  }
   fsOk = LittleFS.begin(true, "/littlefs", 10, "spiffs");
   if (!fsOk) Serial.println("LittleFS fehlt");
   app = new App(synth, store);
@@ -520,7 +541,11 @@ void setup() {
   riddle = new Riddle(synth, store, esp_random());
   riddle->setAlbum(album, &images);
   radioPlayer = new (heap_caps_malloc(sizeof(RadioPlayer), MALLOC_CAP_SPIRAM)) RadioPlayer();
-  home->setApps(APPS, 7);
+  messages = new (heap_caps_malloc(sizeof(Messages), MALLOC_CAP_SPIRAM)) Messages();
+  messages->setBuffer(static_cast<int16_t*>(heap_caps_malloc(Messages::RATE * Messages::MAX_SECS * 2, MALLOC_CAP_SPIRAM)), Messages::RATE * Messages::MAX_SECS);
+  radioPlayer->setMessages(messages);
+  home->setApps(APPS, sizeof(APPS) / sizeof(APPS[0]));
+  home->setPost(messages, T_POST);
   home->setAlbum(album);
   home->setCheckIn(T_CHECKIN);
   checkin->setTargets(T_GRUMMEL, T_BREATHE);
@@ -534,6 +559,9 @@ void setup() {
   app->add(album);
   app->add(riddle);
   app->add(new Radio(*radioPlayer));
+  app->add(new Post(synth, *messages, *radioPlayer));
+  app->add(new Wakeup(synth, store, *radioPlayer));
+  app->setHidden(1u << T_WAKE);
   app->setHome(T_HOME);
   app->setLockTile(T_RADIO);
   app->setSystemMenu(netMenu());
@@ -553,7 +581,7 @@ void setup() {
   xTaskCreatePinnedToCore(inputTask, "input", 4096, nullptr, 4, nullptr, 0);
   if (audio) xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, 0);
   if (audio) xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
-  netBegin(radioPlayer);
+  netBegin(radioPlayer, messages, sdOk);
 }
 
 void loop() {
@@ -598,10 +626,13 @@ void loop() {
 
   if (netTakeAlbumReload()) loadAlbum();   // neues Kartenthema vom Portal
   app->tick(in);
-  portalSync.frame(*app, *radioPlayer, app->currentTitle(), starsGet(store), in.ms);
-  {   // Uhrzeit vom Portal (Ortszeit)
+  portalSync.frame(*app, *radioPlayer, app->currentTitle(), starsGet(store), in.ms, in.epoch, T_WAKE);
+  {   // Uhrzeit vom Portal (Ortszeit), auch in die Echtzeituhr schreiben
     const int64_t pe = radioPlayer->epoch;
-    if (pe > 1600000000 && (!epochBase || llabs(epochBase + int64_t(in.ms / 1000) - pe) > 5)) epochBase = pe - in.ms / 1000;
+    if (pe > 1600000000 && (!epochBase || llabs(epochBase + int64_t(in.ms / 1000) - pe) > 5)) {
+      epochBase = pe - in.ms / 1000;
+      rtcOk = hw::rtcWrite(pe);
+    }
   }
   app->draw(scene);
   uint32_t t1 = micros();

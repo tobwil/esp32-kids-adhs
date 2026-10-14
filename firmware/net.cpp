@@ -2,6 +2,7 @@
 
 #include <DNSServer.h>
 #include <LittleFS.h>
+#include <SD_MMC.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -15,6 +16,8 @@ static constexpr const char* SETUP_SSID = "Grummel-Setup";
 static constexpr int DEFAULT_PORT = 8770;
 
 static RadioPlayer* radio = nullptr;
+static Messages* msgs = nullptr;
+static bool sdOk = false;
 static Preferences prefs;
 static volatile bool wifiOn = true, setupOn = false, setupStop = false, setupStart = false;
 static volatile bool reconnect = false;
@@ -188,14 +191,117 @@ static void clearDir(const char* dir) {
 
 static bool toFile(void* ctx, const uint8_t* data, int n) { return static_cast<File*>(ctx)->write(data, n) == size_t(n); }
 
-static bool download(const char* path, const char* file) {
-  if (LittleFS.totalBytes() - LittleFS.usedBytes() < 80 * 1024) return false;   // Platz für Datei und Dateisystem lassen
-  File f = LittleFS.open(file, "w");
+static bool downloadTo(fs::FS& fs, const char* path, const char* file) {
+  File f = fs.open(file, "w");
   if (!f) return false;
   const bool ok = portalDownload(portalIp, portalPort, path, toFile, &f);
   f.close();
-  if (!ok) LittleFS.remove(file);
+  if (!ok) fs.remove(file);
   return ok;
+}
+
+static bool download(const char* path, const char* file) {
+  if (LittleFS.totalBytes() - LittleFS.usedBytes() < 80 * 1024) return false;   // Platz für Datei und Dateisystem lassen
+  return downloadTo(LittleFS, path, file);
+}
+
+// ---------------- Offline-Bibliothek auf der SD-Karte ----------------
+// /radio/<id>.pcm: Aufnahmen aus dem Portal, /radio/quellen.txt: Senderliste (ohne Spotify) für den Start ohne Netz,
+// /nachricht/<id>.pcm: Sprachnachrichten. Der Tonstrom liest zuerst von hier (SdFiles), sonst vom Portal.
+
+struct SdFiles : LocalFiles {
+  File f;
+  bool open(const char* path) override {
+    if (!sdOk || !SD_MMC.exists(path)) return false;
+    f = SD_MMC.open(path, "r");
+    return bool(f);
+  }
+  int read(uint8_t* buf, int n) override { return f ? int(f.read(buf, n)) : 0; }
+  void close() override { if (f) f.close(); }
+};
+static SdFiles sdFiles;
+
+static void cleanDir(const char* dir, bool (*keep)(const char* name)) {
+  File d = SD_MMC.open(dir);
+  if (!d || !d.isDirectory()) return;
+  String del[16];
+  int n = 0;
+  for (File f = d.openNextFile(); f && n < 16; f = d.openNextFile()) {
+    if (!keep(f.name())) del[n++] = String(dir) + "/" + f.name();
+    f.close();
+  }
+  d.close();
+  for (int i = 0; i < n; i++) SD_MMC.remove(del[i]);
+}
+
+static bool keepRadio(const char* name) {
+  if (!strcmp(name, "quellen.txt")) return true;
+  for (int i = 0; i < radio->nFiles; i++) {
+    char f[48];
+    snprintf(f, sizeof f, "%s.pcm", radio->files[i].id);
+    if (!strcmp(name, f)) return true;
+  }
+  return false;
+}
+
+static bool keepMsg(const char* name) {
+  for (int i = 0; i < msgs->count(); i++) {
+    Message m;
+    char f[32];
+    if (msgs->get(i, m) && (snprintf(f, sizeof f, "%s.pcm", m.id), !strcmp(name, f))) return true;
+  }
+  return false;
+}
+
+static void syncOffline() {
+  if (!sdOk) return;
+  SD_MMC.mkdir("/radio");
+  SD_MMC.mkdir("/nachricht");
+  // Senderliste für den Start ohne Netz (Spotify geht offline nicht)
+  String list;
+  for (int i = 0; i < radio->count(); i++) {
+    RadioSource s;
+    if (radio->source(i, s) && !s.spotify) list += String("quelle ") + s.id + " aufnahme " + s.name + "\n";
+  }
+  File old = SD_MMC.open("/radio/quellen.txt", "r");
+  const String was = old ? old.readString() : String();
+  if (old) old.close();
+  if (was != list) { File f = SD_MMC.open("/radio/quellen.txt", "w"); if (f) { f.print(list); f.close(); } }
+  // je Abfrage höchstens eine Datei holen, damit Abfragen und Ton nicht lange warten
+  for (int i = 0; i < radio->nFiles; i++) {
+    char path[48], tmp[48];
+    snprintf(path, sizeof path, "/radio/%s.pcm", radio->files[i].id);
+    File f = SD_MMC.open(path, "r");
+    const long have = f ? long(f.size()) : -1;
+    if (f) f.close();
+    if (have == radio->files[i].bytes) continue;
+    snprintf(tmp, sizeof tmp, "/radio/%s.tmp", radio->files[i].id);
+    if (downloadTo(SD_MMC, path, tmp)) { SD_MMC.remove(path); SD_MMC.rename(tmp, path); }
+    return;
+  }
+  for (int i = 0; i < msgs->count(); i++) {
+    Message m;
+    char path[40];
+    if (!msgs->get(i, m)) continue;
+    snprintf(path, sizeof path, "/nachricht/%s.pcm", m.id);
+    if (SD_MMC.exists(path)) continue;
+    char tmp[40];
+    snprintf(tmp, sizeof tmp, "/nachricht/%s.tmp", m.id);
+    if (downloadTo(SD_MMC, path, tmp)) SD_MMC.rename(tmp, path);
+    return;
+  }
+  cleanDir("/radio", keepRadio);
+  cleanDir("/nachricht", keepMsg);
+}
+
+// beim Start ohne Netz: Sender von der SD-Karte
+static void loadOfflineSources() {
+  if (!sdOk) return;
+  File f = SD_MMC.open("/radio/quellen.txt", "r");
+  if (!f) return;
+  const String s = f.readString();
+  f.close();
+  if (s.length()) radio->parse(s.c_str());
 }
 
 static void syncAlbum() {
@@ -268,15 +374,18 @@ static void netTask(void*) {
     }
     if (!portalIp[0] || (!radio->online() && millis() - lastFind > 30000)) findPortal();
     if (!portalIp[0]) { radio->setOnline(false); vTaskDelay(pdMS_TO_TICKS(3000)); continue; }
-    if (portalPoll(*radio, portalIp, portalPort)) syncAlbum();
+    if (portalPoll(*radio, msgs, portalIp, portalPort)) { syncAlbum(); syncOffline(); }
     vTaskDelay(pdMS_TO_TICKS(radio->playing() ? 1000 : 2000));
   }
 }
 
-static void streamTask(void*) { portalStreamLoop(*radio, streamHost, portalPort); }
+static void streamTask(void*) { portalStreamLoop(*radio, streamHost, portalPort, &sdFiles); }
 
-void netBegin(RadioPlayer* r) {
+void netBegin(RadioPlayer* r, Messages* m, bool sd) {
   radio = r;
+  msgs = m;
+  sdOk = sd;
+  loadOfflineSources();
   prefs.begin("wlan", false);
   wifiOn = prefs.getBool("an", true);
   snprintf(ssid, sizeof ssid, "%s", prefs.getString("ssid", "").c_str());
