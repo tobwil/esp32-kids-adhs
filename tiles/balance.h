@@ -28,6 +28,7 @@ class Balance : public Tile {
   int level() const { return level_; }
   bool ballPos(int i, float& x, float& y) const;
   void holePos(int i, float& x, float& y) const;
+  void setLevel(int l) { level_ = l; startLevel(); }
 
  private:
   struct Ball { float x, y, vx, vy; bool in; float sink; int hole; };

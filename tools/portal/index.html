@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grummel – Eltern-Portal</title>
+<style>
+  :root { --bg:#f6f4fb; --card:#fff; --ink:#221d33; --dim:#6d6880; --line:#e4e0ef; --acc:#6a52d9; --acc2:#efeaff; --ok:#2e9a5e; --warn:#c0582a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14121c; --card:#1e1b2a; --ink:#ece8f6; --dim:#9a94b4; --line:#2e2a40; --acc:#a08cff; --acc2:#2a2545; --ok:#5fd08e; --warn:#ff9a6a; } }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:24px; margin:4px 0 2px; } h2 { font-size:18px; margin:0 0 12px; }
+  .sub { color:var(--dim); margin:0 0 18px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; margin:14px 0; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+  .seg button { border:0; background:transparent; padding:8px 14px; color:var(--ink); cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--acc); color:#fff; }
+  button.b, a.b { border:1px solid var(--line); background:var(--acc2); color:var(--ink); border-radius:10px; padding:7px 12px; font:inherit; cursor:pointer; text-decoration:none; display:inline-block; }
+  button.p, a.p { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=time], select { font:inherit; padding:7px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  input[type=text] { min-width:0; flex:1; }
+  ul { list-style:none; padding:0; margin:0; }
+  li.src { display:flex; gap:8px; align-items:center; padding:9px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+  li.src:first-child { border-top:0; }
+  li.src .name { flex:1; min-width:140px; font-weight:600; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:999px; background:var(--acc2); color:var(--dim); }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; background:var(--dim); }
+  .dot.on { background:var(--ok); }
+  .hint { color:var(--dim); font-size:14px; }
+  .err { color:var(--warn); font-size:14px; }
+  ol { padding-left:20px; margin:8px 0; } ol li { margin:4px 0; }
+  audio { height:32px; max-width:220px; }
+  .rec { color:var(--warn); font-weight:600; }
+  code { background:var(--acc2); padding:1px 6px; border-radius:6px; font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Grummel – Eltern-Portal</h1>
+  <p class="sub" id="geraet">Lade …</p>
+
+  <section>
+    <h2>Sperre</h2>
+    <div class="row">
+      <div class="seg" id="sperre">
+        <button data-m="0">Aus</button><button data-m="1">Nur Radio</button><button data-m="2">Nach Zeitplan</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px" id="plan">
+      <label>von <input type="time" id="von"></label>
+      <label>bis <input type="time" id="bis"></label>
+    </div>
+    <p class="hint">Gesperrt zeigt das Gerät nur das Radio, Wischen geht nicht. Am Gerät entsperren: 8 Sekunden auf den Bildschirm drücken, dann „Sperre“ antippen.</p>
+  </section>
+
+  <section>
+    <h2>Radio</h2>
+    <ul id="quellen"></ul>
+    <p class="hint" id="leer">Noch keine Sender. Unten eine Aufnahme machen oder eine Spotify-Playlist hinzufügen.</p>
+    <div class="row" style="margin-top:14px">
+      <label>Höchste Lautstärke <input type="range" id="laut" min="10" max="100" step="5"></label> <span id="lautw"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Schlaf-Timer <select id="schlaf">
+        <option value="0">aus</option><option value="15">15 min</option><option value="30">30 min</option>
+        <option value="45">45 min</option><option value="60">1 Stunde</option><option value="90">1,5 Stunden</option></select></label>
+      <label><input type="checkbox" id="zufall"> Spotify-Playlists gemischt abspielen</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Neue Aufnahme</h2>
+    <div class="row">
+      <input type="text" id="aname" placeholder="Name, z. B. Gute-Nacht-Geschichte von Papa" maxlength="46">
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="b p" id="recbtn">● Aufnehmen</button>
+      <span id="recinfo"></span>
+      <audio id="recplay" controls hidden></audio>
+      <button class="b" id="recsave" hidden>Speichern</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="b">Datei hochladen …<input type="file" id="datei" accept="audio/*,video/*" hidden></label>
+      <span class="hint">MP3, M4A, Sprachmemo, WAV …</span>
+    </div>
+    <p class="hint">Aufnehmen im Browser geht am Mac unter <code>http://127.0.0.1:8770</code>. Vom Handy aus lieber eine Datei (Sprachmemo) hochladen.</p>
+    <p class="err" id="aerr"></p>
+  </section>
+
+  <section id="spotify">
+    <h2>Spotify</h2>
+    <p id="spstatus" class="hint"></p>
+    <div id="spsetup">
+      <ol>
+        <li><code>brew install librespot</code> im Terminal, dann das Portal neu starten.</li>
+        <li>Auf <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> eine App anlegen (Web API). Redirect-URI: <code>http://127.0.0.1:8770/spotify/callback</code></li>
+        <li>Die Client-ID hier eintragen: <span class="row" style="display:inline-flex"><input type="text" id="cid" placeholder="Client-ID" size="34"> <button class="b" id="cidsave">Speichern</button></span></li>
+        <li>Am Mac <a class="b p" href="/spotify/login">Mit Spotify verbinden</a> (nur unter 127.0.0.1)</li>
+        <li>In der Spotify-App einmal „Grummel-Radio“ als Lautsprecher auswählen (Mac und Handy im selben WLAN).</li>
+      </ol>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="plink" placeholder="Playlist-Link aus Spotify (Teilen → Link kopieren)">
+      <button class="b p" id="padd">Hinzufügen</button>
+    </div>
+    <div style="margin-top:12px">
+      <button class="b" id="meine">Meine Playlists zeigen</button>
+      <ul id="meineliste" style="margin-top:8px"></ul>
+    </div>
+    <p class="err" id="sperr"></p>
+    <p class="hint">Spotify läuft über librespot, einen inoffiziellen Spotify-Connect-Empfänger. Er braucht Premium und kann bei Änderungen durch Spotify zeitweise ausfallen.</p>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+const hm = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+const mins = (v) => { const [h, m] = v.split(":").map(Number); return h * 60 + m; };
+
+async function post(path, data) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data || {}) });
+  const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
+  if (!j.ok) throw new Error(j.fehler || "Fehler");
+  return j;
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function refresh() {
+  try { state = await (await fetch("/api/status")).json(); } catch { $("geraet").textContent = "Portal nicht erreichbar"; return; }
+  const g = state.geraet, w = g.werte || {};
+  let line = g.online ? "Gerät verbunden" : (g.zuletzt ? "Gerät zuletzt um " + new Date(g.zuletzt * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "Gerät war noch nicht da");
+  if (g.online && w.spielt === "1") { const s = state.quellen.find((q) => q.id === w.radio); line += " · spielt „" + (s ? s.name : w.radio) + "“, Lautstärke " + w.laut; }
+  if (g.online && w.kachel) line += " · " + w.kachel;
+  if (w.sterne) line += " · " + w.sterne + " Sterne";
+  $("geraet").innerHTML = '<span class="dot ' + (g.online ? "on" : "") + '"></span> ' + esc(line);
+
+  document.querySelectorAll("#sperre button").forEach((b) => b.classList.toggle("on", +b.dataset.m === state.sperre.modus));
+  $("plan").style.display = state.sperre.modus === 2 ? "" : "none";
+  if (document.activeElement !== $("von")) $("von").value = hm(state.sperre.von);
+  if (document.activeElement !== $("bis")) $("bis").value = hm(state.sperre.bis);
+  if (document.activeElement !== $("laut")) { $("laut").value = state.laut; $("lautw").textContent = state.laut + " %"; }
+  $("schlaf").value = String(state.schlaf);
+  $("zufall").checked = state.zufall;
+
+  const ul = $("quellen");
+  if (!ul.contains(document.activeElement)) {
+    ul.innerHTML = "";
+    state.quellen.forEach((s, i) => {
+      const li = document.createElement("li");
+      li.className = "src";
+      li.innerHTML = '<span class="name">' + esc(s.name) + '</span><span class="tag">' + (s.art === "spotify" ? "Spotify" : "Aufnahme" + (s.sekunden ? " · " + Math.round(s.sekunden / 60 * 10) / 10 + " min" : "")) + "</span>"
+        + (s.art === "aufnahme" ? '<audio controls preload="none" src="/vorschau/' + s.id + '.wav"></audio>' : "")
+        + '<button class="b" data-a="hoch"' + (i ? "" : " disabled") + '>↑</button><button class="b" data-a="runter"' + (i < state.quellen.length - 1 ? "" : " disabled") + '>↓</button>'
+        + '<button class="b" data-a="name">Umbenennen</button><button class="b" data-a="weg">Entfernen</button>';
+      li.querySelectorAll("button").forEach((b) => b.onclick = () => sourceAction(b.dataset.a, s, i));
+      ul.appendChild(li);
+    });
+  }
+  $("leer").style.display = state.quellen.length ? "none" : "";
+
+  const sp = state.spotify;
+  $("spstatus").innerHTML = "librespot: " + esc(sp.librespot) + " · Web-API: " + (sp.verbunden ? "verbunden" : "nicht verbunden")
+    + (sp.verbunden ? ' <button class="b" id="sptrennen">Trennen</button>' : "") + (sp.hinweis ? '<br><span class="err">' + esc(sp.hinweis) + "</span>" : "");
+  if ($("sptrennen")) $("sptrennen").onclick = async () => { await post("/api/spotify/trennen"); refresh(); };
+  if (document.activeElement !== $("cid")) $("cid").value = sp.client_id;
+  $("spsetup").style.display = sp.verbunden && sp.librespot === "läuft" ? "none" : "";
+}
+
+async function sourceAction(a, s, i) {
+  const ids = state.quellen.map((q) => q.id);
+  if (a === "hoch" || a === "runter") {
+    const j = a === "hoch" ? i - 1 : i + 1;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await post("/api/quelle/reihenfolge", { ids });
+  } else if (a === "name") {
+    const n = prompt("Neuer Name", s.name);
+    if (n) await post("/api/quelle/umbenennen", { id: s.id, name: n });
+  } else if (a === "weg") {
+    if (confirm("„" + s.name + "“ entfernen?" + (s.art === "aufnahme" ? " Die Aufnahme wird gelöscht." : ""))) await post("/api/quelle/loeschen", { id: s.id });
+  }
+  refresh();
+}
+
+async function saveSettings(extra) { await post("/api/einstellungen", extra); refresh(); }
+document.querySelectorAll("#sperre button").forEach((b) => b.onclick = () => saveSettings({ sperre: { modus: +b.dataset.m, von: mins($("von").value), bis: mins($("bis").value) } }));
+["von", "bis"].forEach((id) => $(id).onchange = () => saveSettings({ sperre: { modus: state.sperre.modus, von: mins($("von").value), bis: mins($("bis").value) } }));
+$("laut").oninput = () => $("lautw").textContent = $("laut").value + " %";
+$("laut").onchange = () => saveSettings({ laut: +$("laut").value });
+$("schlaf").onchange = () => saveSettings({ schlaf: +$("schlaf").value });
+$("zufall").onchange = () => saveSettings({ zufall: $("zufall").checked });
+
+// ---- Aufnahme ----
+let rec = null, chunks = [], blob = null, recStart = 0, recTimer = null;
+$("recbtn").onclick = async () => {
+  $("aerr").textContent = "";
+  if (rec && rec.state === "recording") { rec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    rec = new MediaRecorder(stream);
+    chunks = [];
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(recTimer);
+      blob = new Blob(chunks, { type: rec.mimeType });
+      $("recplay").src = URL.createObjectURL(blob);
+      $("recplay").hidden = false; $("recsave").hidden = false;
+      $("recbtn").textContent = "● Neu aufnehmen";
+      $("recinfo").textContent = "";
+    };
+    rec.start();
+    recStart = Date.now();
+    $("recbtn").textContent = "■ Stopp";
+    $("recplay").hidden = true; $("recsave").hidden = true;
+    recTimer = setInterval(() => { const s = Math.round((Date.now() - recStart) / 1000); $("recinfo").innerHTML = '<span class="rec">● ' + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + "</span>"; }, 250);
+  } catch (e) {
+    $("aerr").textContent = "Kein Mikrofon: " + e.message + " (im Browser am Mac unter http://127.0.0.1:8770 öffnen oder eine Datei hochladen)";
+  }
+};
+async function upload(data, typ) {
+  const name = $("aname").value.trim() || "Aufnahme " + new Date().toLocaleDateString("de-DE");
+  $("aerr").textContent = "Wird umgewandelt …";
+  const r = await fetch("/api/aufnahme?name=" + encodeURIComponent(name) + "&typ=" + encodeURIComponent(typ), { method: "POST", body: data });
+  const j = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
+  $("aerr").textContent = j.ok ? "" : j.fehler;
+  if (j.ok) { $("aname").value = ""; $("recplay").hidden = true; $("recsave").hidden = true; $("recbtn").textContent = "● Aufnehmen"; }
+  refresh();
+}
+$("recsave").onclick = () => upload(blob, (blob.type.split("/")[1] || "webm").split(";")[0]);
+$("datei").onchange = (e) => { const f = e.target.files[0]; if (f) upload(f, (f.name.split(".").pop() || "bin").toLowerCase()); e.target.value = ""; };
+
+// ---- Spotify ----
+$("cidsave").onclick = async () => { await post("/api/spotify/client", { client_id: $("cid").value.trim() }); refresh(); };
+$("padd").onclick = async () => {
+  $("sperr").textContent = "";
+  try { await post("/api/spotify/playlist", { link: $("plink").value }); $("plink").value = ""; } catch (e) { $("sperr").textContent = e.message; }
+  refresh();
+};
+$("meine").onclick = async () => {
+  $("sperr").textContent = "";
+  const r = await fetch("/api/spotify/meine");
+  if (!r.ok) { $("sperr").textContent = await r.text(); return; }
+  const list = await r.json(), ul = $("meineliste");
+  ul.innerHTML = "";
+  list.forEach((p) => {
+    const li = document.createElement("li");
+    li.className = "src";
+    li.innerHTML = '<span class="name">' + esc(p.name) + '</span><button class="b">Hinzufügen</button>';
+    li.querySelector("button").onclick = async () => { await post("/api/spotify/playlist", { link: p.uri, name: p.name }); li.remove(); refresh(); };
+    ul.appendChild(li);
+  });
+  if (!list.length) ul.innerHTML = '<li class="hint">Keine Playlists gefunden.</li>';
+};
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

@@ -15,9 +15,10 @@
 //   {"file":"begin","path":"/pferde/3.jpg","size":N}, dann „F <base64>“ (je ≤ 512 Byte), dann {"file":"end"}
 //                  Datei ins LittleFS schreiben (tools/horses.py upload); {"album":"reload"} lädt Karten und Fotos neu
 //   klopf N        N künstliche Schläge im Abstand von 250 ms (Test ohne Tisch)
-//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel)
+//   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
 //   wisch X0 Y0 X1 Y1  Wischen von X0, Y0 nach X1, Y1
+//   boot           BOOT-Taste drücken (Einstellungen auf/zu)
 //   beruehrung     jede Berührung mit Position ausgeben ein/aus (zum Prüfen der Touch-Koordinaten)
 //   bench          Rasterzeit je Form messen
 //   prof           Rechenzeit je Formtyp im Zwei-Sekunden-Protokoll ein/aus
@@ -38,7 +39,11 @@
 #include "checkin.h"
 #include "home.h"
 #include "grummel.h"
+#include "net.h"
+#include "portal_sync.h"
 #include "quiz_kids.h"
+#include "radio.h"
+#include "rewards.h"
 #include "riddle.h"
 #include "fonts.h"
 
@@ -67,10 +72,12 @@ static Synth synth;
 static NvsStore store;
 static App* app;
 static Scene scene;
-// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel.
-enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE };
-static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2},
-                                     {"Kugel", T_BALANCE, 3},   {"Pferde", T_ALBUM, 4},     {"Rätsel", T_RIDDLE, 5}};
+// Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio.
+enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO };
+static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3},
+                                     {"Pferde", T_ALBUM, 4},    {"Rätsel", T_RIDDLE, 5},    {"Radio", T_RADIO, 6}};
+static RadioPlayer* radioPlayer = nullptr;   // im PSRAM (Ringpuffer 64 KB)
+static PortalSync portalSync;
 static Home* home;
 static bool fsOk = false;
 static Riddle* riddle = nullptr;
@@ -196,7 +203,8 @@ static void loadPack() {
 // ---------------- Eingabe (Kern 0) ----------------
 static portMUX_TYPE inMux = portMUX_INITIALIZER_UNLOCKED;
 static TouchSample touchQ[32];
-static volatile bool touchLog = false;   // „beruehrung“: Aufsetzen und Loslassen mit Position ausgeben
+static volatile bool touchLog = false;
+static int fakeBoot = 0;   // serieller Befehl „boot“: Taste für ein paar Frames gedrückt   // „beruehrung“: Aufsetzen und Loslassen mit Position ausgeben
 static int touchN = 0;
 static AccelSample accQ[128];
 static int accHead = 0, accCount = 0;
@@ -278,6 +286,7 @@ static void audioTask(void*) {
   static int16_t stereo[512];
   for (;;) {
     synth.render(mono, 256);
+    if (radioPlayer) radioPlayer->mix(mono, 256);
     for (int i = 0; i < 256; i++) stereo[2 * i] = stereo[2 * i + 1] = mono[i];
     hw::i2s().write(reinterpret_cast<uint8_t*>(stereo), sizeof stereo);
   }
@@ -421,6 +430,8 @@ static void pollSerial() {
         touchQ[touchN++] = {false, int16_t(x1), int16_t(y1), t0 + 180};
         portEXIT_CRITICAL(&inMux);
       }
+    } else if (!strcmp(line, "boot")) {   // BOOT-Taste drücken (Einstellungen auf/zu)
+      fakeBoot = 3;
     } else if (!strcmp(line, "beruehrung")) {
       touchLog = !touchLog;
       Serial.printf("beruehrung %s\n", touchLog ? "an" : "aus");
@@ -431,6 +442,9 @@ static void pollSerial() {
       Serial.printf("album %d Karten, %d aufgedeckt, Fotos dekodiert %d, Fehler %d, zuletzt %lu us\n", album->count(), album->owned(), images.decOk, images.decFail, (unsigned long)images.decUs);
       Serial.printf("mikrofon %.1f dBFS, stimme %.2f\n", float(micDb), float(voiceLevel));
       Serial.printf("neigung x %.2f y %.2f z %.2f g\n", app->motion.tiltX, app->motion.tiltY, app->motion.tiltZ);
+      char ns[160];
+      netStatus(ns, sizeof ns);
+      Serial.printf("%s, sender %d, %s\n", ns, radioPlayer->count(), radioPlayer->playing() ? "spielt" : "still");
     } else if (!strncmp(line, "imureg ", 7)) {   // Testweise ein IMU-Register schreiben: imureg <reg hex> <wert hex>
       unsigned reg = 0, val = 0;
       if (sscanf(line + 7, "%x %x", &reg, &val) == 2) { hw::i2cWriteReg(0x6B, uint8_t(reg), uint8_t(val)); Serial.printf("imureg %02X = %02X\n", reg, val); }
@@ -500,7 +514,8 @@ void setup() {
   album->setImages(&images);
   riddle = new Riddle(synth, store, esp_random());
   riddle->setAlbum(album, &images);
-  home->setApps(APPS, 6);
+  radioPlayer = new (heap_caps_malloc(sizeof(RadioPlayer), MALLOC_CAP_SPIRAM)) RadioPlayer();
+  home->setApps(APPS, 7);
   home->setCheckIn(T_CHECKIN);
   checkin->setTargets(T_GRUMMEL, T_BREATHE);
   loadPack();
@@ -512,7 +527,10 @@ void setup() {
   app->add(balance);
   app->add(album);
   app->add(riddle);
+  app->add(new Radio(*radioPlayer));
   app->setHome(T_HOME);
+  app->setLockTile(T_RADIO);
+  app->setSystemMenu(netMenu());
   app->setSettingsHold(3000);   // Einstellungen nur für Eltern: 3 s halten oder BOOT
   app->setPower(60000, 180000, true, false);   // aus bis zum Tippen, nach 1 min dunkler, nach 3 min schwarz; Klopfen weckt nicht
   app->begin(millis());
@@ -529,6 +547,7 @@ void setup() {
   xTaskCreatePinnedToCore(inputTask, "input", 4096, nullptr, 4, nullptr, 0);
   if (audio) xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, 0);
   if (audio) xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
+  netBegin(radioPlayer);
 }
 
 void loop() {
@@ -565,12 +584,18 @@ void loop() {
       const float u = (in.acc[i].ms - fakeStart) * 0.001f;
       if (in.acc[i].ms >= fakeStart && u < 0.1f) in.acc[i].z += 0.4f * std::exp(-u / 0.012f) * std::sin(6.2831853f * 90 * u + 0.6f);
     }
-  in.boot = hw::bootPressed();
+  in.boot = hw::bootPressed() || fakeBoot > 0;
+  if (fakeBoot > 0) fakeBoot--;
   in.voice = voiceLevel;
   in.ms = millis();
   in.epoch = epochBase ? epochBase + in.ms / 1000 : 0;
 
   app->tick(in);
+  portalSync.frame(*app, *radioPlayer, app->currentTitle(), starsGet(store), in.ms);
+  {   // Uhrzeit vom Portal (Ortszeit)
+    const int64_t pe = radioPlayer->epoch;
+    if (pe > 1600000000 && (!epochBase || llabs(epochBase + int64_t(in.ms / 1000) - pe) > 5)) epochBase = pe - in.ms / 1000;
+  }
   app->draw(scene);
   uint32_t t1 = micros();
   tickUs += t1 - t0;

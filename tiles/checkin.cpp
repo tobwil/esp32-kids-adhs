@@ -154,7 +154,6 @@ void CheckIn::draw(Scene& s) {
     // Frage oben; blendet nach einer Weile ohne Bedienung langsam weg (Einbrennschutz) und kommt wieder
     const float k = std::fmod(idle_, 40.f);
     const float qa = idle_ < 20 ? 1.f : 1 - smooth((k - 20) / 1.5f) * (1 - smooth((k - 36) / 1.5f));
-    // unterhalb des ✕-Knopfs
     s.text(fonts::title, again_ ? "Und wie fühlt sich" : "Wie fühlt sich", W / 2, 66, TXT, qa, Align::Center);
     s.text(fonts::title, again_ ? "dein Bauch jetzt an?" : "dein Bauch an?", W / 2, 102, TXT, qa, Align::Center);
     for (int i = 0; i < N_FEELINGS; i++) {

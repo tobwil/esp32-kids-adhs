@@ -11,3 +11,6 @@ __pycache__/
 tools/horses/out/*.jpg
 tools/horses/out/uebersicht.png
 doc/pferde-uebersicht.png
+
+# Eltern-Portal: Aufnahmen, Einstellungen, Spotify-Anmeldung
+tools/portal/daten/

@@ -12,7 +12,7 @@ namespace dk {
 
 class Home : public Tile {
  public:
-  struct AppIcon { const char* label; int tile; int kind; };   // kind: 0 Gefühle, 1 Grummel, 2 Atmen, 3 Kugel, 4 Pferde, 5 Rätsel
+  struct AppIcon { const char* label; int tile; int kind; };   // kind: 0 Gefühle, 1 Grummel, 2 Atmen, 3 Kugel, 4 Pferde, 5 Rätsel, 6 Radio
   Home(Synth& synth, Store& store);
   void setApps(const AppIcon* apps, int n) { apps_ = apps; nApps_ = n; }
   void setCheckIn(int tile) { checkin_ = tile; }
@@ -23,7 +23,6 @@ class Home : public Tile {
   void draw(Scene& s) override;
   bool wantsMotion() const override { return true; }
   bool claimsDrag() const override { return onBuddy_; }   // Streicheln öffnet keine Einstellungen
-  bool showsClose() const override { return false; }
 
   static void iconPos(int i, int n, float& x, float& y);
   static void needPos(int i, float& x, float& y);

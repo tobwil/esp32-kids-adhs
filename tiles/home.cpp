@@ -34,9 +34,9 @@ float Home::rnd() {
 }
 
 void Home::iconPos(int i, int n, float& x, float& y) {
-  // erste Reihe drei, zweite Reihe der Rest, jeweils mittig
+  // erste Reihe drei, zweite Reihe der Rest (bei vier etwas enger), jeweils mittig
   const int row = i < 3 ? 0 : 1, inRow = row ? n - 3 : (n < 3 ? n : 3), k = row ? i - 3 : i;
-  x = W / 2 + (k - (inRow - 1) * 0.5f) * 104;
+  x = W / 2 + (k - (inRow - 1) * 0.5f) * (inRow > 3 ? 84 : 104);
   y = row ? 384 : 304;
 }
 
@@ -431,6 +431,15 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       s.circle(x, y - 2 * K, 19 * K, hex(0xb7a6ff));
       s.capsule(x - 10 * K, y + 12 * K, x - 15 * K, y + 20 * K, 3 * K, hex(0xb7a6ff));
       s.text(fonts::title, "?", x, y - 2 - fonts::title.lineH / 2.f + 2, hex(0x241c48), 1, Align::Center);
+      break;
+    case 6:   // Radio
+      s.capsule(x - 4 * K, y - 10 * K, x + 12 * K, y - 22 * K, 1.4f * K, hex(0xd8d0e8));
+      s.rrect(x - 17 * K, y - 10 * K, 34 * K, 24 * K, 6 * K, hex(0x8f7fe0));
+      s.circle(x - 6 * K, y + 2 * K, 7 * K, hex(0x2a1f5a));
+      s.circle(x - 6 * K, y + 2 * K, 3 * K, hex(0xb7a6ff));
+      s.capsule(x + 6 * K, y - 3 * K, x + 11 * K, y - 3 * K, 1.6f * K, hex(0xfff0c8));
+      s.capsule(x + 6 * K, y + 3 * K, x + 11 * K, y + 3 * K, 1.6f * K, hex(0xfff0c8));
+      s.capsule(x + 6 * K, y + 8 * K, x + 11 * K, y + 8 * K, 1.6f * K, hex(0xfff0c8));
       break;
     default: {   // Pferd
       static const Horse H = {"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false};

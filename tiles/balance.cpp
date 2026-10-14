@@ -10,7 +10,14 @@
 namespace dk {
 
 static const Col TXT = hex(0xf2eefa), TXT_DIM = hex(0x9a94b4);
-static const Col FIELD = hex(0x111a2e), RIM = hex(0x1f2c4c), PEG_TOP = hex(0xa898f0), PEG_BOT = hex(0x6a58c8);
+// Jede Runde hat ihre Landschaft: Wiese, Strand, Holztisch, Nachthimmel (gedämpfte Farben, damit Kugeln und Löcher gut sichtbar bleiben)
+struct Theme { Col field, rim, light, pegTop, pegBot; };
+static const Theme THEMES[4] = {
+    {hex(0x1c4228), hex(0x2c5a36), hex(0x6fbf5a), hex(0xc4c4bc), hex(0x76766e)},   // Wiese
+    {hex(0x6e5a3c), hex(0x86704c), hex(0xe0bc80), hex(0xd2c2a8), hex(0x8a7a62)},   // Strand
+    {hex(0x4a2f1c), hex(0x5e3d26), hex(0xa8743e), hex(0xd8a470), hex(0x8a5a30)},   // Holz
+    {hex(0x0e1430), hex(0x1c2650), hex(0x3a4ca0), hex(0xa898f0), hex(0x6a58c8)},   // Nacht
+};
 static const Col BALL_TOP[3] = {hex(0xffdf80), hex(0xffb3d1), hex(0xa4f4d6)};
 static const Col BALL_BOT[3] = {hex(0xe8a020), hex(0xe0608e), hex(0x3fae96)};
 
@@ -221,11 +228,103 @@ void Balance::tick(const TileInput& in) {
   }
 }
 
+// Hintergrund: Grundfarbe, weiches Licht und kleine Dinge, die nicht auf den Löchern liegen
+static void drawField(Scene& s, const LevelDef& L, int theme, float clock) {
+  const Theme& T = THEMES[theme];
+  s.rrect(FL - 2, FT - 2, FR - FL + 4, FB - FT + 4, FCR + 2, T.rim);
+  s.rrect(FL, FT, FR - FL, FB - FT, FCR, T.field);
+  uint32_t seed = 0x2545F491u * uint32_t(theme + 1);
+  auto rnd = [&seed]() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFF) / 65536.f; };
+  auto free = [&L](float x, float y, float m) {   // nicht auf Löchern und Steinen
+    for (int h = 0; h < L.nHoles; h++) if ((x - L.hx[h]) * (x - L.hx[h]) + (y - L.hy[h]) * (y - L.hy[h]) < (L.hr[h] + m) * (L.hr[h] + m)) return false;
+    for (int p = 0; p < L.nPegs; p++) if ((x - L.px[p]) * (x - L.px[p]) + (y - L.py[p]) * (y - L.py[p]) < (L.pr[p] + m) * (L.pr[p] + m)) return false;
+    return true;
+  };
+  // Punkt innerhalb des Feldes (mit Abstand zu den runden Ecken)
+  auto spot = [&](float& x, float& y) {
+    for (int k = 0; k < 8; k++) {
+      x = FL + 30 + rnd() * (FR - FL - 60);
+      y = FT + 30 + rnd() * (FB - FT - 60);
+      const float cx = x < W / 2 ? FL + FCR : FR - FCR, cy = y < H / 2 ? FT + FCR : FB - FCR;
+      const bool corner = (x < FL + FCR || x > FR - FCR) && (y < FT + FCR || y > FB - FCR);
+      if (!corner || (x - cx) * (x - cx) + (y - cy) * (y - cy) < (FCR - 24) * (FCR - 24)) return true;
+    }
+    return false;
+  };
+  float x, y;
+  switch (theme) {
+    case 0:   // Wiese: Sonnenlicht, Grasbüschel, kleine Blumen
+      s.glow(140, 150, 125, T.light, 0.22f);   // Leuchten bleibt ganz im Feld (wird sonst über den Rand addiert)
+      for (int i = 0; i < 22; i++) {
+        if (!spot(x, y) || !free(x, y, 14)) continue;
+        const Col g = i & 1 ? hex(0x2f6a3c) : hex(0x3a7a44);
+        for (int k = -1; k <= 1; k++) s.capsule(x + k * 3, y, x + k * 7, y - 9 - (k == 0 ? 4 : 0), 1.3f, g, 0.9f);
+      }
+      for (int i = 0; i < 9; i++) {
+        if (!spot(x, y) || !free(x, y, 16)) continue;
+        static const uint32_t PET[3] = {0xffd6e8, 0xfff2b0, 0xd8d0ff};
+        const Col c = hex(PET[i % 3]);
+        for (int k = 0; k < 5; k++) s.circle(x + 4.5f * std::sin(k * TAU / 5), y - 4.5f * std::cos(k * TAU / 5), 3, c, 0.75f);
+        s.circle(x, y, 2.4f, hex(0xffc94a), 0.9f);
+      }
+      break;
+    case 1: {   // Strand: Meer oben, Wellenlinien im Sand, Muscheln, Seesterne
+      // Feld ist Meer, darauf liegt der Sand mit runden oberen Ecken: so biegt sich das Ufer an den Seiten hoch
+      const float sw = 3 * std::sin(clock * 0.6f), shore = FT + 78 + sw;
+      s.rrect(FL, FT, FR - FL, FB - FT, FCR, hex(0x1f6a7a));
+      s.rrect(FL, shore - 5, FR - FL, FB - shore + 5, FCR, hex(0xe8f4f0), 0.4f);   // Schaumkante
+      s.rrect(FL, shore, FR - FL, FB - shore, FCR, T.field);
+      s.glow(W / 2, 330, 100, T.light, 0.16f);
+      for (int i = 0; i < 6; i++) {
+        const float ry = FT + 120 + i * 52 + 6 * std::sin(i * 1.7f);
+        s.arc(W / 2 + 40 * std::sin(i * 2.3f), ry + 180, 200, 1.6f, -0.45f, 0.45f, hex(0x86704c), 0.7f);
+      }
+      for (int i = 0; i < 8; i++) {
+        if (!spot(x, y) || y < FT + 80 || !free(x, y, 14)) continue;
+        if (i % 3 == 0) s.star(x, y, 7, hex(0xe8875a), 0.85f, rnd());
+        else { s.ellipse(x, y, 5, 4, hex(0xf2d8c8), hex(0xc8a090), 0.85f); s.arc(x, y + 3, 4, 1, PIF + 0.6f, TAU - 0.6f, hex(0xa07a6a), 0.6f); }
+      }
+      break;
+    }
+    case 2:   // Holztisch: Maserung und Astlöcher
+      s.glow(W / 2, 200, 150, T.light, 0.14f);
+      for (int i = 0; i < 14; i++) {
+        const float gy = FT + 22 + i * 30 + 5 * std::sin(i * 2.1f);
+        const Col c = i & 1 ? hex(0x5c3b22) : hex(0x3c2414);
+        float px = FL + 8, py = gy;
+        for (int k = 1; k <= 6; k++) {
+          const float nx = FL + 8 + k * (FR - FL - 16) / 6, ny = gy + 5 * std::sin(k * 1.3f + i);
+          s.capsule(px, py, nx, ny, 1.1f, c, 0.55f);
+          px = nx; py = ny;
+        }
+      }
+      for (int i = 0; i < 3; i++) {
+        if (!spot(x, y) || !free(x, y, 20)) continue;
+        s.ellipse(x, y, 11, 6, hex(0x3a2212), 0.7f);
+        s.arc(x, y, 14, 1.2f, 0, TAU, hex(0x5c3b22), 0.6f);
+      }
+      break;
+    default:   // Nachthimmel: Sterne funkeln langsam, Mondsichel
+      s.glow(W / 2, 240, 160, T.light, 0.2f);
+      for (int i = 0; i < 40; i++) {
+        if (!spot(x, y) || !free(x, y, 8)) continue;
+        const float tw = 0.55f + 0.3f * std::sin(clock * (0.4f + rnd() * 0.5f) + i);
+        s.circle(x, y, 0.9f + rnd() * 1.3f, hex(0xeef0ff), tw);
+      }
+      if (free(FR - 64, FT + 62, 30)) {
+        s.glow(FR - 64, FT + 62, 46, hex(0xfff0c0), 0.18f);
+        s.circle(FR - 64, FT + 62, 20, hex(0xfff0c8));
+        s.circle(FR - 56, FT + 56, 18, T.field);
+      }
+      break;
+  }
+}
+
 void Balance::draw(Scene& s) {
-  const LevelDef& L = (phase_ == DONE || phase_ == PAUSE) ? LEVELS[(level_ + N_LEVELS - 1) % N_LEVELS] : LEVELS[level_];
-  // Spielfeld
-  s.rrect(FL - 2, FT - 2, FR - FL + 4, FB - FT + 4, FCR + 2, RIM);
-  s.rrect(FL, FT, FR - FL, FB - FT, FCR, FIELD);
+  const int lv = (phase_ == DONE || phase_ == PAUSE) ? (level_ + N_LEVELS - 1) % N_LEVELS : level_;
+  const LevelDef& L = LEVELS[lv];
+  const Theme& T = THEMES[lv % 4];
+  drawField(s, L, lv % 4, clock_);
   // Löcher
   for (int h = 0; h < L.nHoles; h++) {
     const float pulse = 0.5f + 0.5f * std::sin(clock_ * 2 + h);
@@ -236,7 +335,7 @@ void Balance::draw(Scene& s) {
   // Steine
   for (int p = 0; p < L.nPegs; p++) {
     s.ellipse(L.px[p] + 3, L.py[p] + 4, L.pr[p], L.pr[p] * 0.9f, hex(0x070b14), 0.6f);
-    s.ellipse(L.px[p], L.py[p], L.pr[p], L.pr[p], PEG_TOP, PEG_BOT);
+    s.ellipse(L.px[p], L.py[p], L.pr[p], L.pr[p], T.pegTop, T.pegBot);
     s.ellipse(L.px[p] - L.pr[p] * 0.35f, L.py[p] - L.pr[p] * 0.4f, L.pr[p] * 0.3f, L.pr[p] * 0.16f, hex(0xffffff), 0.25f);
   }
   // Kugeln (bei DONE/PAUSE sind alle drin)

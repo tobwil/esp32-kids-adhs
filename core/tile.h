@@ -23,6 +23,7 @@ struct TileInput {
   float framePeak = 0;            // für die Messwert-Anzeige
   float tiltX = 0, tiltY = 0, tiltZ = 1;   // Neigung (g, Bildschirmachsen: x rechts, y oben, z aus dem Bildschirm)
   float voice = 0;                // Lautstärke am Mikrofon 0..1 (nur der Pegel, nichts wird aufgenommen)
+  bool locked = false;            // Sperre aktiv (z. B. Schlafenszeit: nur Radio)
   float threshold = 0;
 };
 
@@ -37,7 +38,6 @@ class Tile {
   // Wunsch, zu einer anderen Kachel zu wechseln (Index oder GOTO_BACK/GOTO_HOME, -1 = keiner); die App holt ihn nach jedem tick ab
   static constexpr int GOTO_BACK = -2, GOTO_HOME = -3;
   int takeGoto() { const int g = goto_; goto_ = -1; return g; }
-  virtual bool showsClose() const { return true; }   // ✕ oben rechts zum Schließen (nicht auf dem Dashboard)
   virtual void tick(const TileInput& in) = 0;
   virtual void draw(Scene& s) = 0;
   virtual bool keepAwake() const { return false; }   // Display nicht dimmen (z. B. Meeting läuft, Grummel frisst)

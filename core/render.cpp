@@ -400,8 +400,8 @@ void Scene::drawGlow(const Cmd& c, uint16_t* fb, int y0, int y1) const {
       const float dx = s0 + 0.5f - cx;
       int q = int((dx * dx + dyf * dyf) * k), dq = int((2 * dx + 1) * k);
       for (int x = s0; x <= s1; x++, q += dq, dq += ddq) {
-        const int idx = q >> 16;
-        if (unsigned(idx) >= unsigned(last)) continue;
+        const int idx = q < 0 ? 0 : q >> 16;   // in der Mitte kann q durch Rundung knapp unter 0 fallen
+        if (idx >= last) continue;
         // gesättigte Addition aller drei Kanäle auf einmal
         uint32_t sum = spread(row[x]) + lut[idx];
         const uint32_t ov = sum & 0x08010020u;   // Überlauf von Grün, Rot, Blau

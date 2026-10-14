@@ -21,7 +21,7 @@ static constexpr float Q_Y = 72, Q_W = 296;                          // Textfrag
 static constexpr float ANS_X = 44, ANS_W = W - 88, ANS_Y = 214, ANS_H = 56, ANS_GAP = 10;
 static constexpr float CNT_Q_Y = 64, CNT_CY = 200, CNT_DX = 64, CNT_DY = 58, CNT_R = 21;
 static constexpr float NUM_Y = 316, NUM_W = 88, NUM_H = 72, NUM_DX = 104;
-static constexpr float PHOTO_Y = 18, HQ_Y = 222, H_ANS_Y = 262, H_ANS_H = 48, H_ANS_GAP = 8;   // Foto oben wie im Album, ✕ liegt darauf
+static constexpr float PHOTO_Y = 18, HQ_Y = 222, H_ANS_Y = 262, H_ANS_H = 48, H_ANS_GAP = 8;   // Foto oben wie im Album
 static constexpr float RIGHT_SECS = 1.5f, DONE_SECS = 6;
 
 static inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }
