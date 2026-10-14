@@ -44,6 +44,8 @@ class Tile {
   virtual bool wantsMotion() const { return false; }
   // Kachel nutzt den Finger selbst (Joystick, Streicheln): langes Halten öffnet keine Einstellungen
   virtual bool claimsDrag() const { return false; }
+  // Finger, der an (x, y) aufsetzt, gehört der Kachel: kein Wischen zwischen den Apps (außer vom Rand aus)
+  virtual bool claimsDragAt(float x, float y) const { return claimsDrag(); }
   virtual float motionThreshold() const { return 0.10f; }
 
   // Einstellungen der Kachel (erscheinen nach langem Druck unter den allgemeinen)

@@ -240,6 +240,12 @@ static int screens(const char* dir) {
   auto tapFace = [&](int i) { float x, y; CheckIn::faceCenter(i, x, y); sc.tap(int(x), int(y)); };
   auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, 6, x, y); sc.tap(int(x), int(y)); };
   auto close = [&]() { sc.tap(int(App::CLOSE_X), int(App::CLOSE_Y)); sc.run(0.5f); };
+  // Wischen in 8 Schritten; mid: Bildname für ein Bild mitten im Wisch
+  auto swipe = [&](int x0, int y0, int x1, int y1, const char* mid = nullptr) {
+    sc.touch(true, x0, y0); sc.frame();
+    for (int k = 1; k <= 8; k++) { sc.touch(true, x0 + (x1 - x0) * k / 8, y0 + (y1 - y0) * k / 8); sc.frame(); if (k == 5 && mid) shot(mid); }
+    sc.touch(false, x1, y1); sc.frame(); sc.run(0.5f);
+  };
   int guard = 0;
 
   // Ei: streicheln, bis Grummel schlüpft
@@ -262,7 +268,7 @@ static int screens(const char* dir) {
   for (int k = 0; k < 40; k++) { sc.touch(true, 140 + int(80 * std::fabs(std::sin(k * 0.25f))), 150 + (k % 7)); sc.frame(); }
   shot("02_streicheln");
   sc.touch(false, 180, 150); sc.frame(); sc.run(1.5f);
-  sc.tap(int(Home::BUDDY_X), int(Home::BUDDY_Y)); sc.run(0.4f); shot("03_kichern");
+  sc.tap(int(Home::BUDDY_X), int(kids.home.buddyY())); sc.run(0.4f); shot("03_kichern");
   sc.run(1.5f);
   sc.imu.shaking = true; sc.run(1.0f); shot("04_schwindelig"); sc.imu.shaking = false; sc.run(2.0f);
   sc.in.voice = 0.5f; sc.run(1.2f); shot("05_zuhoeren"); sc.in.voice = 0; sc.run(0.4f); shot("05b_zugehoert"); sc.run(2.5f);
@@ -283,6 +289,18 @@ static int screens(const char* dir) {
   // Atmen öffnen und mit ✕ schließen
   tapIcon(2); sc.run(4.0f); shot("15_atmen");
   close(); shot("16_dashboard_nach_x");
+  // Wischen: nach oben blättert durch die Apps, zur Seite schließt
+  swipe(300, 400, 300, 250, "16a_wisch_hoch"); shot("16b_gefuehle");
+  if (app.current() != T_CHECKIN) printf("  FEHLER: Wisch hoch auf dem Dashboard öffnet nicht Gefühle (%d)\n", app.current()), nIssues++;
+  swipe(300, 400, 300, 250); if (app.current() != T_GRUMMEL) printf("  FEHLER: Wisch hoch → Grummel (%d)\n", app.current()), nIssues++;
+  swipe(300, 250, 300, 400); if (app.current() != T_CHECKIN) printf("  FEHLER: Wisch runter → Gefühle (%d)\n", app.current()), nIssues++;
+  swipe(300, 250, 300, 400); if (app.current() != T_HOME) printf("  FEHLER: Wisch runter → Dashboard (%d)\n", app.current()), nIssues++;
+  tapIcon(5); sc.run(0.6f); swipe(300, 150, 300, 300); if (app.current() != T_ALBUM) printf("  FEHLER: Rätsel, Wisch runter → Album (%d)\n", app.current()), nIssues++;
+  swipe(80, 250, 280, 250, "16c_wisch_zu"); if (app.current() != T_HOME) printf("  FEHLER: Wisch zur Seite schließt nicht (%d)\n", app.current()), nIssues++;
+  sc.run(0.5f); shot("16d_dashboard_nach_wisch");
+  tapIcon(3); sc.run(0.6f); swipe(184, 300, 184, 150); if (app.current() != T_BALANCE) printf("  FEHLER: Kugel: Fingerjoystick darf nicht blättern (%d)\n", app.current()), nIssues++;
+  swipe(4, 250, 200, 250); if (app.current() != T_HOME) printf("  FEHLER: Kugel: Wisch vom Rand schließt nicht (%d)\n", app.current()), nIssues++;
+  sc.run(0.5f);
   // Kugel ins Loch
   tapIcon(3); sc.run(0.6f); shot("17_kugel_start");
   sc.run(1.0f); sc.touch(true, 184, 400); sc.run(0.8f); shot("18_kugel_finger"); sc.touch(false, 184, 400); sc.frame();

@@ -17,7 +17,7 @@ Das Gerät startet schwarz, ein Tipp weckt es. Startseite ist das **Dashboard**.
 
 Regeln für das Haustier: Grummel stirbt nie, wird nie krank und macht keine Vorwürfe. Leere Bedürfnisse heißen nur, dass er freundlich um etwas bittet.
 
-Unter Grummel liegen die App-Symbole. Jede App öffnet bildschirmfüllend und schließt sich mit dem ✕ oben rechts. Ein Abzeichen am Pferde-Symbol zeigt, dass eine neue Karte wartet.
+Unter Grummel liegen die App-Symbole. Jede App öffnet bildschirmfüllend. Wischen nach oben oder unten blättert von App zu App, Wischen zur Seite oder das ✕ oben rechts schließt sie. Ein Abzeichen am Pferde-Symbol zeigt, dass eine neue Karte wartet.
 
 | App | Was passiert |
 |---|---|
@@ -36,8 +36,12 @@ Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestalt
 |---|---|
 | Tippen, wenn das Display schwarz ist | aufwecken (das Gerät startet schwarz und geht nach 3 min Ruhe wieder aus) |
 | App-Symbol antippen | App öffnen |
-| ✕ oben rechts | App schließen, zurück zum Dashboard |
+| nach oben wischen | nächste App (vom Dashboard aus: die erste) |
+| nach unten wischen | vorige App, vor der ersten kommt das Dashboard |
+| nach links oder rechts wischen, ✕ oben rechts | App schließen, zurück zum Dashboard |
 | 3 s lang drücken oder BOOT | Einstellungen für Eltern (Ton, Klopf-Empfindlichkeit, Einmessen, Steuerung) |
+
+Beim Kugelspiel steuert der Finger die Kugel. Dort wirkt Wischen nur, wenn es am Bildschirmrand beginnt, ebenso auf Grummel selbst (dort ist es Streicheln). Gedimmt reagiert das Gerät normal, nur aus dem Schwarzen heraus weckt die erste Berührung bloß auf.
 
 Apps, die aus „Wie geht's dir?“ heraus geöffnet wurden, kehren danach dorthin zurück („Und wie fühlt sich dein Bauch jetzt an?“).
 
@@ -110,6 +114,8 @@ tools/.venv/bin/python tools/horses.py upload     # aufs Gerät (LittleFS)
 | `kachel N` | zu Kachel N (0 Dashboard, 1 Gefühle, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel) |
 | `neustart-kind` | Spielstände auf Anfang (Sterne, Karten, Check-ins, Ei), Einstellungen bleiben, dann Neustart |
 | `tipp X Y` | Tippen an Display-Position X, Y |
+| `wisch X0 Y0 X1 Y1` | Wischen von X0, Y0 nach X1, Y1 |
+| `beruehrung` | jede Berührung mit Position ausgeben ein/aus |
 | `klopf N` | N künstliche Schläge im Abstand von 250 ms |
 | `imu`, `imuraw`, `imureg R V` | Messwerte, Rohregister, Register schreiben (Fehlersuche) |
 | `bench`, `prof` | Rasterzeit je Form, Rechenzeit je Formtyp |

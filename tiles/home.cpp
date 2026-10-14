@@ -16,7 +16,7 @@ static const Col TXT = hex(0xf2eefa), TXT_DIM = hex(0x9a94b4), INK = hex(0x1c122
 static const Col BODY_TOP = hex(0x86e3c9), BODY_BOT = hex(0x3aa98f), CHEEK = hex(0xff9ec0);
 static const Col ICON_BG = hex(0x1d2540), ICON_RIM = hex(0x2e3a62), GOLD = hex(0xffd166);
 static const Col NEED_COL[Pet::N_NEEDS] = {hex(0xffa64d), hex(0xff8fb8), hex(0x5fd8c8)};
-static constexpr float ICON_R = 30, NEED_R = 15;
+static constexpr float ICON_R = 26, NEED_R = 15, ICON_K = ICON_R / 30;   // ICON_K: Symbole waren für Radius 30 gezeichnet
 static constexpr float BUBBLE_Y = 58, BUBBLE_H = 40;
 
 static inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }
@@ -36,8 +36,14 @@ float Home::rnd() {
 void Home::iconPos(int i, int n, float& x, float& y) {
   // erste Reihe drei, zweite Reihe der Rest, jeweils mittig
   const int row = i < 3 ? 0 : 1, inRow = row ? n - 3 : (n < 3 ? n : 3), k = row ? i - 3 : i;
-  x = W / 2 + (k - (inRow - 1) * 0.5f) * 112;
-  y = row ? 372 : 270;
+  x = W / 2 + (k - (inRow - 1) * 0.5f) * 104;
+  y = row ? 384 : 304;
+}
+
+bool Home::claimsDragAt(float x, float y) const {
+  // Streicheln beginnt auf Grummel (oder dem Ei): dort öffnet Wischen keine App
+  const float dx = x - BUDDY_X, dy = y - buddyY(), r = R_ * 1.5f;
+  return dx * dx + dy * dy < r * r;
 }
 
 void Home::needPos(int i, float& x, float& y) {
@@ -107,7 +113,7 @@ void Home::tick(const TileInput& in) {
   if (pet_.stage == Pet::EGG) {
     if (in.tap) { pet_.warmth += 0.08f; sqv_ += 2; }
     if (in.finger) {
-      const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - BUDDY_Y;
+      const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - buddyY();
       onBuddy_ = dx * dx + dy * dy < (R_ * 1.6f) * (R_ * 1.6f);
       if (onBuddy_ && hadFinger_) {
         const float d = std::hypot(in.fingerX - lastFX_, in.fingerY - lastFY_);
@@ -164,7 +170,7 @@ void Home::tick(const TileInput& in) {
       bubbleT_ = 0;
       return;
     }
-    const float dx = in.tapX - BUDDY_X, dy = in.tapY - BUDDY_Y;
+    const float dx = in.tapX - BUDDY_X, dy = in.tapY - buddyY();
     if (dx * dx + dy * dy < (R_ + 14) * (R_ + 14)) {
       if (sleeping) { say("Psst … ich schlafe.", 2); return; }
       giggle_ = 1.1f;
@@ -198,7 +204,7 @@ void Home::tick(const TileInput& in) {
   // ---- Streicheln: Finger zieht über Grummel ----
   onBuddy_ = false;
   if (in.finger) {
-    const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - BUDDY_Y;
+    const float dx = in.fingerX - BUDDY_X, dy = in.fingerY - buddyY();
     onBuddy_ = dx * dx + dy * dy < (R_ * 1.5f) * (R_ * 1.5f);
     if (onBuddy_ && hadFinger_) {
       const float d = std::hypot(in.fingerX - lastFX_, in.fingerY - lastFY_);
@@ -211,7 +217,7 @@ void Home::tick(const TileInput& in) {
         if (cuddleAcc_ > 900) { cuddleAcc_ = 0; if (pet_.addGrowth(1)) { growT_ = 0; say("Ich bin gewachsen!", 3); } }
         if (strokeAcc_ > 70 && nHearts_ < 12) {   // Herzchen steigen auf
           strokeAcc_ = 0;
-          hearts_[nHearts_++] = {BUDDY_X + (rnd() - 0.5f) * R_ * 1.4f, BUDDY_Y - R_ * 0.6f, 0};
+          hearts_[nHearts_++] = {BUDDY_X + (rnd() - 0.5f) * R_ * 1.4f, buddyY() - R_ * 0.6f, 0};
           Synth::Voice v; v.wave = Synth::NOISE; v.filt = Synth::LP; v.cut0 = v.cut1 = 220; v.amF = 24; v.amD = 0.8f; v.attack = 0.05f; v.dur = 0.5f; v.vol = 0.2f; synth_.play(v);
           if (bubbleT_ <= 0 && rnd() < 0.35f) say(rnd() < 0.5f ? "Mmmh, schön!" : "Das mag ich!", 1.8f);
         }
@@ -241,7 +247,7 @@ void Home::tick(const TileInput& in) {
 
   // Blick, Blinzeln, Feder, Herzchen
   float tx = std::sin(clock_ * 0.37f) * 0.5f, ty = std::sin(clock_ * 0.23f) * 0.3f;
-  if (in.finger) { tx = clampf((in.fingerX - BUDDY_X) / 120, -1, 1); ty = clampf((in.fingerY - BUDDY_Y) / 120, -1, 1); }
+  if (in.finger) { tx = clampf((in.fingerX - BUDDY_X) / 120, -1, 1); ty = clampf((in.fingerY - buddyY()) / 120, -1, 1); }
   if (foodT_ >= 0) { tx = -0.6f; ty = -0.8f; }   // schaut dem Apfel entgegen
   lookX_ = approach(lookX_, tx, 6, dt);
   lookY_ = approach(lookY_, ty, 6, dt);
@@ -259,29 +265,30 @@ void Home::tick(const TileInput& in) {
 // ---------------- Zeichnen ----------------
 
 void Home::drawEgg(Scene& s) {
-  const float w = pet_.warmth;
+  const float w = pet_.warmth, k = R_ / 44;   // k: gezeichnet für Radius 44
   const float shake = (w > 0.5f ? std::sin(clock_ * 20) * 2 * (w - 0.5f) : 0) + sq_ * 30;
-  const float x = BUDDY_X + shake, y = BUDDY_Y + 6;
+  const float x = BUDDY_X + shake, y = buddyY();
   if (hatchT_ >= 0) {   // Schale springt auf, Licht
     const float u = smooth(hatchT_ / 0.6f);
-    s.glow(x, y, 120 * u + 1, hex(0xfff0b0), 0.6f * (1 - u * 0.5f));
-    s.ellipse(x - 30 * u, y - 10 - 40 * u, 34, 26, hex(0xfff3d6), hex(0xf0c890), 1 - u);
-    s.ellipse(x + 30 * u, y + 20 * u, 34, 26, hex(0xfff3d6), hex(0xf0c890), 1 - u);
+    s.glow(x, y, 150 * u + 1, hex(0xfff0b0), 0.6f * (1 - u * 0.5f));
+    s.ellipse(x - 40 * u, y - 14 - 50 * u, 34 * k, 26 * k, hex(0xfff3d6), hex(0xf0c890), 1 - u);
+    s.ellipse(x + 40 * u, y + 26 * u, 34 * k, 26 * k, hex(0xfff3d6), hex(0xf0c890), 1 - u);
     return;
   }
-  s.glow(x, y, 80, hex(0xffd88a), 0.12f + 0.25f * w);
-  s.ellipse(x, y, 36, 46, hex(0xfff3d6), hex(0xf0c890));
-  s.circle(x - 14, y - 12, 6, hex(0x86e3c9), 0.7f);
-  s.circle(x + 12, y + 8, 8, hex(0x86e3c9), 0.7f);
-  s.circle(x - 6, y + 24, 5, hex(0x86e3c9), 0.7f);
-  s.ellipse(x - 12, y - 24, 8, 5, hex(0xffffff), 0.5f);
+  s.glow(x, y, 80 * k, hex(0xffd88a), 0.12f + 0.25f * w);
+  s.ellipse(x, y, 36 * k, 46 * k, hex(0xfff3d6), hex(0xf0c890));
+  s.circle(x - 14 * k, y - 12 * k, 6 * k, hex(0x86e3c9), 0.7f);
+  s.circle(x + 12 * k, y + 8 * k, 8 * k, hex(0x86e3c9), 0.7f);
+  s.circle(x - 6 * k, y + 24 * k, 5 * k, hex(0x86e3c9), 0.7f);
+  s.ellipse(x - 12 * k, y - 24 * k, 8 * k, 5 * k, hex(0xffffff), 0.5f);
+  const Col crack = hex(0x8a6a40);
   if (w > 0.35f) {   // Risse
-    s.capsule(x - 20, y - 6, x - 10, y + 2, 1.4f, hex(0x8a6a40));
-    s.capsule(x - 10, y + 2, x - 2, y - 8, 1.4f, hex(0x8a6a40));
+    s.capsule(x - 20 * k, y - 6 * k, x - 10 * k, y + 2 * k, 1.6f, crack);
+    s.capsule(x - 10 * k, y + 2 * k, x - 2 * k, y - 8 * k, 1.6f, crack);
   }
   if (w > 0.7f) {
-    s.capsule(x - 2, y - 8, x + 8, y + 1, 1.4f, hex(0x8a6a40));
-    s.capsule(x + 8, y + 1, x + 18, y - 7, 1.4f, hex(0x8a6a40));
+    s.capsule(x - 2 * k, y - 8 * k, x + 8 * k, y + 1 * k, 1.6f, crack);
+    s.capsule(x + 8 * k, y + 1 * k, x + 18 * k, y - 7 * k, 1.6f, crack);
   }
   const float a = 0.6f + 0.3f * std::sin(clock_ * 2.5f);
   s.text(fonts::body, "Streichel das Ei!", W / 2, 64, TXT, a, Align::Center);
@@ -291,7 +298,7 @@ void Home::drawBuddy(Scene& s) {
   const float R = R_;
   const bool baby = pet_.stage == Pet::BABY, sleeping = asleep();
   const float breathe = 1 + (sleeping ? 0.04f : 0.02f) * std::sin(clock_ * (sleeping ? 0.9f : 1.6f));
-  const float x = BUDDY_X + listen_ * 2, y = BUDDY_Y + (52 - R) * 0.8f - 4 * smooth(giggle_) - startle_ * 6;
+  const float x = BUDDY_X + listen_ * 2, y = buddyY() - 4 * smooth(giggle_) - startle_ * 6;
   const float rx = R * (1 + sq_) * breathe, ry = R * (1 - sq_) * breathe;
   if (growT_ >= 0)   // Wachsen: Funkeln
     for (int k = 0; k < 8; k++) {
@@ -311,17 +318,17 @@ void Home::drawBuddy(Scene& s) {
   s.ellipse(x + rx * 0.56f, y + ry * 0.14f, R * 0.13f * ch, R * 0.08f * ch, CHEEK, 0.4f + 0.3f * purr_);
   // Schmuck für gesammelte Sterne
   const int acc = Pet::accessory(starsGet(store_));
-  const float hx = x + rx * 0.45f, hy = y - ry * 0.78f;
+  const float hx = x + rx * 0.45f, hy = y - ry * 0.78f, m = R / 52;   // m: gezeichnet für Radius 52
   if (acc == 1) {   // Schleife
-    s.ellipse(hx - 9, hy, 9, 6, hex(0xff6fa8)); s.ellipse(hx + 9, hy, 9, 6, hex(0xff6fa8)); s.circle(hx, hy, 4.5f, hex(0xffa6c9));
+    s.ellipse(hx - 9 * m, hy, 9 * m, 6 * m, hex(0xff6fa8)); s.ellipse(hx + 9 * m, hy, 9 * m, 6 * m, hex(0xff6fa8)); s.circle(hx, hy, 4.5f * m, hex(0xffa6c9));
   } else if (acc == 2) {   // Blume
-    for (int k = 0; k < 5; k++) s.circle(hx + 8 * std::sin(k * TAU / 5), hy - 8 * std::cos(k * TAU / 5), 5.5f, hex(0xffe08a));
-    s.circle(hx, hy, 4.5f, hex(0xff9a5a));
+    for (int k = 0; k < 5; k++) s.circle(hx + 8 * m * std::sin(k * TAU / 5), hy - 8 * m * std::cos(k * TAU / 5), 5.5f * m, hex(0xffe08a));
+    s.circle(hx, hy, 4.5f * m, hex(0xff9a5a));
   } else if (acc == 3) {   // Krone
-    const float cx = x, cy = y - ry - 4;
-    s.rrect(cx - 18, cy - 4, 36, 10, 3, GOLD);
-    for (int k = -1; k <= 1; k++) s.star(cx + k * 12, cy - 8, 6, GOLD);
-    s.circle(cx, cy + 1, 2.5f, hex(0xff6b5a));
+    const float cx = x, cy = y - ry - 4 * m;
+    s.rrect(cx - 18 * m, cy - 4 * m, 36 * m, 10 * m, 3 * m, GOLD);
+    for (int k = -1; k <= 1; k++) s.star(cx + k * 12 * m, cy - 8 * m, 6 * m, GOLD);
+    s.circle(cx, cy + 1 * m, 2.5f * m, hex(0xff6b5a));
   }
   // Augen
   const float e = R * (baby ? 0.23f : 0.19f);
@@ -395,38 +402,39 @@ void Home::drawNeeds(Scene& s) {
 }
 
 void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
+  constexpr float K = ICON_K;
   s.circle(x, y, ICON_R + 2, ICON_RIM);
   s.circle(x, y, ICON_R, ICON_BG);
   switch (a.kind) {
-    case 0: drawFace(s, CheckIn::FROH, x, y, 22, clock_); break;
+    case 0: drawFace(s, CheckIn::FROH, x, y, 22 * K, clock_); break;
     case 1: {   // kleiner Grummel mit Wutfunken
-      s.ellipse(x, y + 3, 19, 17, BODY_TOP, BODY_BOT);
-      s.circle(x - 6, y, 3.5f, EYE); s.circle(x + 6, y, 3.5f, EYE);
-      s.circle(x - 6, y, 1.8f, INK); s.circle(x + 6, y, 1.8f, INK);
+      s.ellipse(x, y + 3 * K, 19 * K, 17 * K, BODY_TOP, BODY_BOT);
+      s.circle(x - 6 * K, y, 3.5f * K, EYE); s.circle(x + 6 * K, y, 3.5f * K, EYE);
+      s.circle(x - 6 * K, y, 1.8f * K, INK); s.circle(x + 6 * K, y, 1.8f * K, INK);
       for (int k = 0; k < 3; k++) {
         const float an = clock_ * 1.5f + k * 2.1f;
-        s.glow(x + 24 * std::sin(an), y - 20 * std::cos(an), 7, hex(0xff5a2c), 0.7f);
+        s.glow(x + 22 * K * std::sin(an), y - 19 * K * std::cos(an), 7 * K, hex(0xff5a2c), 0.7f);
       }
       break;
     }
     case 2:   // Ballon
-      s.capsule(x, y + 15, x + 2, y + 26, 1, hex(0xd8d0e8));
-      s.ellipse(x, y - 2, 15, 18, hex(0xffb8cc), hex(0xe8668e));
-      s.ellipse(x - 5, y - 9, 4, 3, hex(0xffffff), 0.4f);
+      s.capsule(x, y + 15 * K, x + 2 * K, y + 26 * K, 1, hex(0xd8d0e8));
+      s.ellipse(x, y - 2 * K, 15 * K, 18 * K, hex(0xffb8cc), hex(0xe8668e));
+      s.ellipse(x - 5 * K, y - 9 * K, 4 * K, 3 * K, hex(0xffffff), 0.4f);
       break;
     case 3:   // Kugel und Loch
-      s.circle(x + 7, y + 6, 11, hex(0x02040a));
-      s.ring(x + 7, y + 6, 12, 2, hex(0x3a4a70));
-      s.ellipse(x - 9, y - 7, 9, 9, hex(0xffdf80), hex(0xe8a020));
+      s.circle(x + 7 * K, y + 6 * K, 11 * K, hex(0x02040a));
+      s.ring(x + 7 * K, y + 6 * K, 12 * K, 2, hex(0x3a4a70));
+      s.ellipse(x - 9 * K, y - 7 * K, 9 * K, 9 * K, hex(0xffdf80), hex(0xe8a020));
       break;
     case 5:   // Rätsel: Fragezeichen in einer Sprechblase
-      s.circle(x, y - 2, 19, hex(0xb7a6ff));
-      s.capsule(x - 10, y + 12, x - 15, y + 20, 3, hex(0xb7a6ff));
+      s.circle(x, y - 2 * K, 19 * K, hex(0xb7a6ff));
+      s.capsule(x - 10 * K, y + 12 * K, x - 15 * K, y + 20 * K, 3 * K, hex(0xb7a6ff));
       s.text(fonts::title, "?", x, y - 2 - fonts::title.lineH / 2.f + 2, hex(0x241c48), 1, Align::Center);
       break;
     default: {   // Pferd
       static const Horse H = {"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false};
-      drawHorse(s, H, x - 2, y + 20, 0.36f, clock_ * 0.3f);
+      drawHorse(s, H, x - 2 * K, y + 20 * K, 0.36f * K, clock_ * 0.3f);
       if (cardsWaiting() > 0) {   // neue Karte wartet
         const float p = 0.8f + 0.2f * std::sin(clock_ * 4);
         s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 11 * p, GOLD);

@@ -11,6 +11,9 @@ namespace dk {
 static constexpr int BRIGHT = 200, BRIGHT_DIM = 40;
 static constexpr float SETTINGS_Y0 = 100, SETTINGS_H = 52, SETTINGS_GAP = 12;
 static constexpr float TRANS_OUT = 0.12f, TRANS_IN = 0.18f;   // s
+static constexpr float TAP_MOVE = 20, TAP_MS = 700, EDGE = 36;    // Tipp: so wenig bewegt, so kurz; Rand für Wischen über Spiele
+static constexpr float SWIPE_GO = 70, SWIPE_FLICK = 35, SWIPE_FLICK_MS = 300;
+static constexpr float CLOSE_HIT = App::CLOSE_R + 26;
 
 static const Col TXT = hex(0xe8e4f4), PILL = hex(0x2a2540), ACCENT = hex(0xb7a6ff);
 static const char* const SOUND_NAMES[3] = {"aus", "leise", "an"};
@@ -38,6 +41,7 @@ void App::setCurrent(int i) {
 void App::show(int i) {
   if (i < 0 || i >= int(tiles_.size())) return;
   transTo_ = -1; trans_ = 0;
+  slideX_ = slideY_ = dragX_ = dragY_ = 0;
   if (i == home_) for (int& b : back_) b = -1;
   setCurrent(i);
 }
@@ -62,6 +66,19 @@ void App::wake() {
   // nach Abschalten immer aufs Dashboard (vorhersehbarer Einstieg)
   if (off_ && cur_ != home_) show(home_);
   lastAct_ = ms_;
+}
+
+int App::swipeTarget(float d) const {
+  // nach oben gewischt (d < 0): nächste App; nach unten: vorige, vor der ersten liegt das Dashboard
+  const int n = int(tiles_.size());
+  if (d < 0) {
+    int t = cur_ + 1;
+    if (t == home_) t++;
+    return t < n ? t : -1;
+  }
+  if (cur_ == home_) return -1;
+  const int t = cur_ - 1;
+  return t < 0 ? home_ : t;
 }
 
 int App::settingsItems() const { return 1 + tiles_[cur_]->settingsCount() + 1; }   // Ton, Kachel…, Fertig
@@ -108,37 +125,69 @@ void App::tick(const Input& in) {
   if (motion.shaking) shakeMs_ = in.ms;
   const bool shakeLock = shakeMs_ && in.ms - shakeMs_ < 600;
   if (shakeLock && mode_ != NONE) mode_ = DONE;
-  const bool wasOff = off_ || dim_;
+  const bool wasOff = off_;   // gedimmt reagiert alles normal, nur aus dem Schwarzen weckt die erste Berührung bloß auf
   for (int i = 0; i < in.nTouch; i++) {
     const TouchSample& t = in.touch[i];
     if (t.down && !touching_) {
       touching_ = true;
       sx_ = lx_ = t.x; sy_ = ly_ = t.y; sMs_ = t.ms;
       touchPeak_ = 0;
-      mode_ = off_ || dim_ || shakeLock ? DONE : PENDING;   // erste Berührung weckt nur auf
+      mode_ = off_ || shakeLock ? DONE : PENDING;
+      const bool edge = t.x < EDGE || t.x > W - EDGE || t.y < EDGE || t.y > H - EDGE;
+      swipeOk_ = !settings_ && trans_ <= 0 && (edge || !tiles_[cur_]->claimsDragAt(t.x, t.y));
       wake();
     } else if (t.down && touching_) {
       lx_ = t.x; ly_ = t.y;
       const float dx = lx_ - sx_, dy = ly_ - sy_;
-      if (mode_ == PENDING && dx * dx + dy * dy > 18 * 18) mode_ = DONE;   // gezogen statt getippt
+      if (mode_ == PENDING && dx * dx + dy * dy > TAP_MOVE * TAP_MOVE) {   // gezogen statt getippt
+        mode_ = DONE;
+        if (swipeOk_) {
+          swipeH_ = std::fabs(dx) > std::fabs(dy);
+          if (!swipeH_ || cur_ != home_) mode_ = SWIPE;   // auf dem Dashboard schließt waagerecht nichts
+        }
+      }
+      if (mode_ == SWIPE) {
+        // Bild folgt dem Finger; geht es in die Richtung nicht weiter, nur ein wenig (Gummiband)
+        const float d = swipeH_ ? dx : dy;
+        const bool can = swipeH_ || swipeTarget(d) >= 0;
+        const float v = can ? d * 0.6f : d * 0.15f;
+        dragX_ = swipeH_ ? v : 0;
+        dragY_ = swipeH_ ? 0 : v;
+      }
       wake();
     } else if (!t.down && touching_) {
       touching_ = false;
       releaseMs_ = t.ms;
       const float dx = t.x - sx_, dy = t.y - sy_;
-      if (mode_ == PENDING && t.ms - sMs_ < 450 && dx * dx + dy * dy < 18 * 18) {
+      if (mode_ == PENDING && t.ms - sMs_ < TAP_MS && dx * dx + dy * dy < TAP_MOVE * TAP_MOVE) {
         if (settings_) settingsTap(sx_, sy_);
-        else if (cur_ != home_ && tiles_[cur_]->showsClose() &&
-                 (sx_ - CLOSE_X) * (sx_ - CLOSE_X) + (sy_ - CLOSE_Y) * (sy_ - CLOSE_Y) < (CLOSE_R + 12) * (CLOSE_R + 12))
+        else if (closeShown() && (sx_ - CLOSE_X) * (sx_ - CLOSE_X) + (sy_ - CLOSE_Y) * (sy_ - CLOSE_Y) < CLOSE_HIT * CLOSE_HIT)
           go(Tile::GOTO_HOME);   // ✕
         else { ti.tap = true; ti.tapX = sx_; ti.tapY = sy_; ti.tapPeak = touchPeak_; }
+      } else if (mode_ == SWIPE && transTo_ < 0) {
+        const float d = swipeH_ ? dx : dy;
+        const bool far = std::fabs(d) > SWIPE_GO || (std::fabs(d) > SWIPE_FLICK && t.ms - sMs_ < SWIPE_FLICK_MS);
+        if (far) {
+          const float dir = d < 0 ? -1.f : 1.f;
+          if (swipeH_) { go(Tile::GOTO_HOME); slideX_ = dir; }   // schließen
+          else if (swipeTarget(d) >= 0) {
+            const int to = swipeTarget(d);
+            go(to);
+            if (to != home_) back_[to] = -1;   // geblättert, nicht geöffnet: zurück geht es aufs Dashboard
+            slideY_ = dir;
+          }
+        }
       }
       mode_ = NONE;
     }
   }
+  if (mode_ != SWIPE && trans_ <= 0) {   // zurückfedern
+    dragX_ += -dragX_ * std::fmin(1.f, dt_ * 14);
+    dragY_ += -dragY_ * std::fmin(1.f, dt_ * 14);
+  }
   // langer Druck öffnet die Einstellungen
   if (touching_ && mode_ == PENDING && !settings_ && in.ms - sMs_ > holdMs_ && !tiles_[cur_]->claimsDrag()) { openSettings(); mode_ = DONE; }
-  ti.finger = touching_ && !settings_ && !wasOff;
+  ti.finger = touching_ && !settings_ && !wasOff && mode_ != SWIPE;
   ti.fingerX = lx_;
   ti.fingerY = ly_;
   // BOOT-Taste: Einstellungen auf/zu
@@ -158,7 +207,7 @@ void App::tick(const Input& in) {
       }
     } else {
       trans_ -= dt_ / TRANS_IN;
-      if (trans_ <= 0) trans_ = 0;
+      if (trans_ <= 0) { trans_ = 0; slideX_ = slideY_ = 0; dragX_ = dragY_ = 0; }
     }
   }
 
@@ -204,8 +253,11 @@ void App::tick(const Input& in) {
 void App::draw(Scene& s) {
   s.reset();
   if (off_) return;
-  s.ox = std::round(orbX_);
-  s.oy = std::round(orbY_);
+  // nach einem Wisch: altes Bild gleitet weiter hinaus, das neue kommt von der anderen Seite
+  float slide = 0;
+  if (slideX_ != 0 || slideY_ != 0) slide = transTo_ >= 0 ? trans_ * 120 : -trans_ * 60;
+  s.ox = std::round(orbX_ + dragX_ * (transTo_ >= 0 || trans_ <= 0 ? 1.f : 0.f) + slideX_ * slide);
+  s.oy = std::round(orbY_ + dragY_ * (transTo_ >= 0 || trans_ <= 0 ? 1.f : 0.f) + slideY_ * slide);
   const float tf = 1 - std::fmin(1.f, trans_);
   s.fade = tf * (1.f - settingsA_ * 0.9f);
   tiles_[cur_]->draw(s);

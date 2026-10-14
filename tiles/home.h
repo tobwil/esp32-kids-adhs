@@ -27,7 +27,9 @@ class Home : public Tile {
 
   static void iconPos(int i, int n, float& x, float& y);
   static void needPos(int i, float& x, float& y);
-  static constexpr float BUDDY_X = W / 2, BUDDY_Y = 160;
+  static constexpr float BUDDY_X = W / 2, BUDDY_Y = 176, BUDDY_MAX = 80;   // Mitte bei voller Größe; kleiner steht er auf derselben Linie
+  bool claimsDragAt(float x, float y) const override;
+  float buddyY() const { return BUDDY_Y + (BUDDY_MAX - R_) * 0.8f; }
   const Pet& pet() const { return pet_; }   // für den Simulator
 
  private:

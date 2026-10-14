@@ -52,10 +52,10 @@ bool Pet::applyEvents(Store& s) {
 
 float Pet::size() const {
   switch (stage) {
-    case EGG: return 44;
-    case BABY: return 38;
-    case KID: return 46;
-    default: return 52;
+    case EGG: return 60;
+    case BABY: return 58;
+    case KID: return 70;
+    default: return 80;
   }
 }
 

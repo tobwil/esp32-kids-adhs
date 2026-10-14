@@ -17,6 +17,8 @@
 //   klopf N        N künstliche Schläge im Abstand von 250 ms (Test ohne Tisch)
 //   kachel N       zur Kachel N wechseln (0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel)
 //   tipp X Y       Tippen an Display-Position X, Y (Test ohne Finger)
+//   wisch X0 Y0 X1 Y1  Wischen von X0, Y0 nach X1, Y1
+//   beruehrung     jede Berührung mit Position ausgeben ein/aus (zum Prüfen der Touch-Koordinaten)
 //   bench          Rasterzeit je Form messen
 //   prof           Rechenzeit je Formtyp im Zwei-Sekunden-Protokoll ein/aus
 #include <Arduino.h>
@@ -194,6 +196,7 @@ static void loadPack() {
 // ---------------- Eingabe (Kern 0) ----------------
 static portMUX_TYPE inMux = portMUX_INITIALIZER_UNLOCKED;
 static TouchSample touchQ[32];
+static volatile bool touchLog = false;   // „beruehrung“: Aufsetzen und Loslassen mit Position ausgeben
 static int touchN = 0;
 static AccelSample accQ[128];
 static int accHead = 0, accCount = 0;
@@ -222,6 +225,7 @@ static void inputTask(void*) {
       int16_t x = lx, y = ly;
       if (hw::readTouch(down, x, y) && (down || wasDown)) {
         if (!down) { x = lx; y = ly; }
+        if (touchLog && down != wasDown) Serial.printf("beruehrung %s %d %d\n", down ? "auf" : "los", x, y);
         TouchSample s{down, x, y, now};
         portENTER_CRITICAL(&inMux);
         if (touchN < 32) touchQ[touchN++] = s;
@@ -402,12 +406,24 @@ static void pollSerial() {
       int x = 0, y = 0;
       if (sscanf(line + 5, "%d %d", &x, &y) == 2) {
         portENTER_CRITICAL(&inMux);
-        if (touchN < 31) {
+        if (touchN < 30) {
           touchQ[touchN++] = {true, int16_t(x), int16_t(y), uint32_t(millis())};
           touchQ[touchN++] = {false, int16_t(x), int16_t(y), uint32_t(millis() + 80)};
         }
         portEXIT_CRITICAL(&inMux);
       }
+    } else if (!strncmp(line, "wisch ", 6)) {   // künstlicher Wisch in 8 Schritten über 160 ms: wisch X0 Y0 X1 Y1
+      int x0, y0, x1, y1;
+      if (sscanf(line + 6, "%d %d %d %d", &x0, &y0, &x1, &y1) == 4) {
+        portENTER_CRITICAL(&inMux);
+        const uint32_t t0 = millis();
+        for (int k = 0; k <= 8 && touchN < 31; k++) touchQ[touchN++] = {true, int16_t(x0 + (x1 - x0) * k / 8), int16_t(y0 + (y1 - y0) * k / 8), t0 + 20u * k};
+        touchQ[touchN++] = {false, int16_t(x1), int16_t(y1), t0 + 180};
+        portEXIT_CRITICAL(&inMux);
+      }
+    } else if (!strcmp(line, "beruehrung")) {
+      touchLog = !touchLog;
+      Serial.printf("beruehrung %s\n", touchLog ? "an" : "aus");
     } else if (!strcmp(line, "status")) {
       Serial.printf("status fragen %d (%s, %s)  dateisystem %s  zeit %lld  laufzeit %lu s\n", pack.count(), pack.id(), packText ? "übertragen" : "eingebaut",
                     fsOk ? "ok" : "fehlt", (long long)(epochBase ? epochBase + millis() / 1000 : 0), (unsigned long)(millis() / 1000));

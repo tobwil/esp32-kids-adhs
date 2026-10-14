@@ -1,5 +1,6 @@
-// Launcher: ein Dashboard als Startseite, die Funktionen sind Apps, die bildschirmfüllend öffnen und sich mit
-// dem ✕ oben rechts schließen lassen. Apps können andere Apps öffnen (Check-in → Grummel) und kehren mit
+// Launcher: ein Dashboard als Startseite, die Funktionen sind Apps, die bildschirmfüllend öffnen.
+// Wischen nach oben/unten blättert durch die Apps (Reihenfolge wie hinzugefügt, das Dashboard steht vorn),
+// Wischen nach links oder rechts schließt die App, ebenso das ✕ oben rechts. Apps können andere Apps öffnen (Check-in → Grummel) und kehren mit
 // GOTO_BACK dorthin zurück. Langer Druck oder BOOT öffnet die Einstellungen.
 // Außerdem: Einbrennschutz (Bild wandert langsam), Dimmen/Abschalten bei Ruhe, Ton.
 #pragma once
@@ -32,6 +33,7 @@ class App {
   // wakeOnMotion: Klopfen/Schütteln weckt auch (sonst nur Berührung und BOOT)
   void setPower(uint32_t dimMs, uint32_t offMs, bool startOff, bool wakeOnMotion) { dimMs_ = dimMs; offMs_ = offMs; startOff_ = startOff; wakeOnMotion_ = wakeOnMotion; }
 
+  int current() const { return cur_; }
   bool closeShown() const { return cur_ != home_ && tiles_[cur_]->showsClose(); }
   static constexpr float CLOSE_X = W - 44, CLOSE_Y = 44, CLOSE_R = 19;   // ✕-Knopf
 
@@ -57,7 +59,11 @@ class App {
   float trans_ = 0;           // 0 = ruhig, steigt beim Ausblenden bis 1, dann wird gewechselt und eingeblendet
 
   // Touch
-  enum Mode { NONE, PENDING, DONE } mode_ = NONE;
+  enum Mode { NONE, PENDING, SWIPE, DONE } mode_ = NONE;
+  bool swipeOk_ = false, swipeH_ = false;   // darf gewischt werden, waagerecht (schließen) oder senkrecht (blättern)
+  float dragX_ = 0, dragY_ = 0;             // Bild folgt dem Finger
+  float slideX_ = 0, slideY_ = 0;           // Richtung der laufenden Überblendung nach einem Wisch
+  int swipeTarget(float d) const;           // Ziel eines senkrechten Wischs (-1 = keins)
   bool touching_ = false;
   float sx_ = 0, sy_ = 0, lx_ = 0, ly_ = 0, touchPeak_ = 0;
   uint32_t sMs_ = 0, releaseMs_ = 0, shakeMs_ = 0;
