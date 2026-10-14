@@ -135,9 +135,9 @@ Alles, was das Portal speichert (Aufnahmen, Einstellungen, Spotify-Anmeldung), l
 
 Test ohne Gerät: `sim/dksim --portal-test` holt Sender und Kartenthema vom laufenden Portal, spielt den ersten Sender 3 s ab, misst den Ton und zählt die Kartenbilder. Im interaktiven Simulator spielt das Radio über die Mac-Lautsprecher (Portal-Adresse in `DK_PORTAL`, sonst 127.0.0.1).
 
-### Cloud-Portal (von unterwegs, ohne laufenden Mac)
+### Cloud-Portal (optional, derzeit nicht genutzt)
 
-Dasselbe Portal gibt es als Cloudflare Worker (`tools/cloud`): Es läuft in der Cloud, das Gerät holt sich Einstellungen, Sender, Nachrichten, Kartenthemen und Fragen per HTTPS in jedem WLAN mit Internet, auch wenn der Mac aus ist. Speicher ist ein R2-Bucket in der EU, der kostenlose Rahmen von Cloudflare reicht für eine Familie. Spotify gibt es nur über das Mac-Portal (librespot braucht einen Rechner, der läuft).
+Wir bleiben lokal: Das Mac-Portal reicht, nichts verlässt das Heimnetz. Falls später Nachrichten von unterwegs gebraucht werden, liegt dasselbe Portal fertig als Cloudflare Worker in `tools/cloud`: Es läuft in der Cloud, das Gerät holt sich Einstellungen, Sender, Nachrichten, Kartenthemen und Fragen per HTTPS in jedem WLAN mit Internet, auch wenn der Mac aus ist. Speicher ist ein R2-Bucket in der EU, der kostenlose Rahmen von Cloudflare reicht für eine Familie. Spotify gibt es nur über das Mac-Portal (librespot braucht einen Rechner, der läuft).
 
 - **Anmeldung:** Eltern mit Passwort (signiertes Cookie, 60 Tage), das Gerät mit eigenem Schlüssel (`Authorization: Bearer …`). Beides liegt als Geheimnis bei Cloudflare, nicht im Repository.
 - **Umwandeln im Browser:** Aufnahmen und Hörspiele wandelt der Browser vor dem Hochladen in 16 kHz mono um (bis 50 Minuten am Stück), Kartenbilder auf 328 × 196 (ganzes Bild, Rand unscharf). Das Mac-Portal nutzt dieselbe Oberfläche.
