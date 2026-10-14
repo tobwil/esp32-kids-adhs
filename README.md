@@ -111,6 +111,7 @@ tools/.venv/bin/python tools/portal/portal.py
 
 Dann `http://127.0.0.1:8770` am Mac oder `http://<mac-name>.local:8770` vom Handy. Dort:
 
+- **Rätsel-Fragen** bearbeiten (siehe unten)
 - **Post:** Kontakte anlegen, Nachrichten ans Gerät aufnehmen oder hochladen, Nachrichten vom Gerät anhören (neue sind markiert)
 - **Wecker** (Uhrzeit, Tage, Weckton) und **Nachtlicht**
 - **Apps** einzeln an- und abschalten (abgeschaltete verschwinden vom Dashboard und sind auch per Wischen nicht erreichbar)
@@ -143,7 +144,9 @@ Tonie-Figuren lassen sich nicht abspielen: Das Gerät hat keinen NFC-Leser, und 
 
 ## Rätsel-Fragen austauschen
 
-Die Fragen stehen in [quiz/kinder-2klasse.json](quiz/kinder-2klasse.json): drei Antworten, die richtige zuerst (das Gerät mischt), dazu eine kurze Erklärung. `"bild": "zaehl:7:apfel"` zeigt sieben Äpfel zum Zählen (auch `stern`, `herz`, `ball`, 1 bis 12 Stück). `quiz.py check` prüft Längen, Zeichen und ob das Bild zur Antwort passt.
+Am einfachsten im Eltern-Portal unter **Rätsel-Fragen**: nach Kategorie filtern, Fragen anlegen, bearbeiten, löschen. Pro Frage gibt es eine richtige und zwei falsche Antworten (das Gerät mischt sie), eine kurze Erklärung für falsche Antworten und auf Wunsch ein Zählbild (Äpfel, Sterne, Herzen, Bälle, so viele, wie die richtige Antwort sagt). Beim Speichern prüft das Portal Längen, Zeichen (die Schrift auf dem Gerät kennt Umlaute, aber keine Emojis), Dubletten und ob das Zählbild zur Antwort passt. Das Gerät lädt den Katalog im WLAN von selbst. Startwert ist der eingebaute Katalog [quiz/kinder-2klasse.json](quiz/kinder-2klasse.json), „Auf die eingebauten Fragen zurücksetzen“ holt ihn zurück.
+
+Ohne Portal geht es weiter am Mac und per USB:
 
 ```bash
 tools/.venv/bin/python tools/quiz.py check  quiz/kinder-2klasse.json

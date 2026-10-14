@@ -420,10 +420,11 @@ static void pollSerial() {
       quizFile.close();
       LittleFS.remove("/quiz.txt");
       LittleFS.rename("/quiz.tmp", "/quiz.txt");
+      LittleFS.remove("/quiz.ver");
       loadPack();
       Serial.printf("quiz fertig %d %s\n", pack.count(), pack.id());
     } else if (strstr(line, "\"quiz\"") && strstr(line, "\"reset\"")) {
-      if (fsOk) LittleFS.remove("/quiz.txt");
+      if (fsOk) { LittleFS.remove("/quiz.txt"); LittleFS.remove("/quiz.ver"); }
       loadPack();
       Serial.printf("quiz fertig %d %s\n", pack.count(), pack.id());
     } else if (!strncmp(line, "tipp ", 5)) {   // künstlicher Tipp: runter und nach 80 ms wieder hoch
@@ -634,6 +635,7 @@ void loop() {
   in.epoch = epochBase ? epochBase + in.ms / 1000 : 0;
 
   if (netTakeAlbumReload()) loadAlbum();   // neues Kartenthema vom Portal
+  if (netTakeQuizReload()) loadPack();     // neue Rätsel-Fragen vom Portal
   app->tick(in);
   portalSync.frame(*app, *radioPlayer, app->currentTitle(), starsGet(store), in.ms, in.epoch, T_WAKE);
   {   // Uhrzeit vom Portal (Ortszeit), auch in die Echtzeituhr schreiben

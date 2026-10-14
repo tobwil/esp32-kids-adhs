@@ -37,6 +37,8 @@ if "--daten" in sys.argv:   # anderer Datenordner (z. B. für eine Vorführung)
 REC = os.path.join(DATA, "aufnahmen")
 ALBEN = os.path.join(DATA, "alben")
 POST = os.path.join(DATA, "nachrichten")
+FRAGEN = os.path.join(DATA, "fragen.json")
+FRAGEN_START = os.path.join(os.path.dirname(os.path.dirname(HERE)), "quiz", "kinder-2klasse.json")   # eingebauter Katalog
 POST_INDEX = os.path.join(POST, "index.json")
 CONFIG = os.path.join(DATA, "einstellungen.json")
 TOKENS = os.path.join(DATA, "spotify.json")
@@ -279,6 +281,7 @@ def device_reply():
         for s in cfg["quellen"]:
             lines.append(f"quelle {s['id']} {s['art']} {s['name']}")
         lines.append(f"apps {int(cfg.get('apps_aus', 0))}")
+        lines.append(f"fragen {quiz_version():08x}")
         w = cfg["wecker"]
         lines.append(f"wecker {1 if w['an'] else 0} {w['min']} {w['tage']} {w['ton'] or 'melodie'}")
         lines.append(f"nacht {1 if cfg.get('nachtlicht') else 0}")
@@ -457,6 +460,41 @@ def post_add(richtung, kontakt, pcm):
     return mid
 
 
+# ---------------- Rätsel-Fragen ----------------
+# daten/fragen.json: Liste wie quiz/kinder-2klasse.json (Prüfung und Gerätezeilen aus tools/quiz.py)
+
+def quiz_load():
+    try:
+        with open(FRAGEN, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        with open(FRAGEN_START, encoding="utf-8") as f:   # beim ersten Start: der eingebaute Katalog
+            return json.load(f)["fragen"]
+
+
+def quiz_save(fragen):
+    with open(FRAGEN, "w", encoding="utf-8") as f:
+        json.dump(fragen, f, ensure_ascii=False, indent=1)
+
+
+def quiz_text():
+    import quiz
+    return "#pack portal\n" + "\n".join(quiz.lines(quiz_load())) + "\n"
+
+
+def quiz_version():
+    return zlib.crc32(quiz_text().encode()) or 1
+
+
+def quiz_check(q, others):
+    """Probleme einer Frage (leere Liste = in Ordnung)."""
+    import quiz
+    out = [re.sub(r"^Frage \d+ \([^)]*\): ", "", p) for p in quiz.problems([q])]
+    if q.get("frage", "").strip().lower() in {o["frage"].strip().lower() for o in others}:
+        out.append("Diese Frage gibt es schon")
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "GrummelPortal/1"
@@ -516,6 +554,13 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2) == "wav":
                     return self.send(200, wav_header(len(pcm)) + pcm, "audio/wav")
                 return self.send(200, pcm, "application/octet-stream")
+            if u.path == "/fragen.txt":   # Katalog fürs Gerät
+                return self.send(200, quiz_text())
+            if u.path == "/api/fragen":
+                import quiz
+                fragen = quiz_load()
+                return self.json({"fragen": fragen, "kategorien": sorted({f["kategorie"] for f in fragen}),
+                                  "limits": quiz.LIMITS, "probleme": quiz.problems(fragen)})
             if u.path == "/api/apps":   # am Gerät umgestellt
                 with lock:
                     cfg["apps_aus"] = int(q.get("aus", 0)) & 0xFE
@@ -626,6 +671,32 @@ class Handler(BaseHTTPRequestHandler):
                         if ton != "melodie" and not find_source(ton):
                             ton = "melodie"
                         cfg["wecker"] = {"an": bool(w.get("an")), "min": int(w.get("min", 420)) % 1440, "tage": int(w.get("tage", 0x1F)) & 0x7F, "ton": ton}
+                elif u.path == "/api/frage":   # anlegen oder ändern (index = Position in der Liste)
+                    fragen = quiz_load()
+                    i = data.get("index")
+                    q = {"kategorie": field(data.get("kategorie"), 24), "schwierigkeit": data.get("schwierigkeit", "leicht"),
+                         "frage": field(data.get("frage"), 110), "antworten": [field(a, 30) for a in data.get("antworten", [])][:3],
+                         "richtig": 0, "erklaerung": field(data.get("erklaerung"), 170)}
+                    if data.get("bild"):
+                        q["bild"] = field(data["bild"], 24)
+                    others = [f for k, f in enumerate(fragen) if k != i]
+                    probs = quiz_check(q, others)
+                    if probs:
+                        raise RuntimeError(" · ".join(probs))
+                    if i is None:
+                        fragen.append(q)
+                    else:
+                        fragen[int(i)] = q
+                    quiz_save(fragen)
+                elif u.path == "/api/frage/loeschen":
+                    fragen = quiz_load()
+                    i = int(data["index"])
+                    if 0 <= i < len(fragen):
+                        del fragen[i]
+                    quiz_save(fragen)
+                elif u.path == "/api/fragen/zuruecksetzen":
+                    if os.path.exists(FRAGEN):
+                        os.remove(FRAGEN)
                 elif u.path == "/api/kontakt":
                     if len(cfg["kontakte"]) >= MAX_CONTACTS:
                         raise RuntimeError(f"Höchstens {MAX_CONTACTS} Kontakte")

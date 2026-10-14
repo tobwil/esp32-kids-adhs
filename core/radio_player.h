@@ -13,6 +13,7 @@
 //   album <thema> <version>     aktives Kartenthema (eingebaut: „pferde 0“), Version ändert sich bei jeder Bearbeitung
 //   wecker <an> <min> <tage> <ton>  Wecker: Minuten seit Mitternacht, Tage als Bitmaske (Bit 0 = Montag), Ton „melodie“ oder Sender-ID
 //   nacht <0|1>                 Nachtlicht mit Uhr in der Schlafenszeit
+//   fragen <version>            Rätsel-Fragen aus dem Portal (GET /fragen.txt), Version ändert sich bei jeder Bearbeitung
 //   datei <id> <bytes>          Aufnahme zum Mitnehmen auf die SD-Karte (Offline-Bibliothek)
 //   nachricht …, kontakt …      siehe messages.h
 // Ton: GET /radio/<id>.pcm liefert 16 Bit mono mit Synth::RATE (Spotify: ein gemeinsamer Live-Strom /radio/spotify.pcm).
@@ -101,6 +102,7 @@ class RadioPlayer {
   void setMessages(Messages* m) { msgs_ = m; }
   char albumTheme[24] = "";
   uint32_t albumVersion = 0;
+  uint32_t quizVersion = 0;           // 0 = Portal hat (noch) keinen Katalog gemeldet
 
   // ---- Audio-Thread ----
   void mix(int16_t* mono, int n);     // Radio dazumischen

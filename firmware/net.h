@@ -15,3 +15,4 @@ void netStatus(char* out, int n);   // für den seriellen Befehl „status“
 // Sammelalbum: true = ein Thema aus dem Portal liegt in /album (sonst die eingebauten Pferde)
 bool netAlbumTheme();
 bool netTakeAlbumReload();          // neues Thema geladen: einmal true
+bool netTakeQuizReload();           // neue Rätsel-Fragen in /quiz.txt: einmal true

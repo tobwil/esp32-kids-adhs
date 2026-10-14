@@ -182,6 +182,7 @@ void RadioPlayer::parse(const char* text) {
     else if (!std::strcmp(line, "hinweis")) snprintf(hint_, sizeof hint_, "%s", rest);
     else if (!std::strcmp(line, "apps")) appsOff = std::atol(rest);
     else if (!std::strcmp(line, "nacht")) nightLight = std::atoi(rest) != 0;
+    else if (!std::strcmp(line, "fragen")) quizVersion = uint32_t(std::strtoul(rest, nullptr, 16));
     else if (!std::strcmp(line, "wecker")) {
       int on = 0;
       char tone[32] = "melodie";

@@ -42,6 +42,7 @@
   .grid label.wide { grid-column:1 / -1; }
   .grid input[type=text] { width:100%; }
   .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  #q_liste { max-height:460px; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:0 10px; }
   .chip { display:inline-flex; gap:6px; align-items:center; padding:4px 6px 4px 12px; border-radius:999px; background:var(--acc2); }
   .chip button { border:0; background:transparent; color:var(--dim); cursor:pointer; font-size:16px; }
   .neu { color:#fff; background:var(--acc); border-radius:999px; font-size:12px; padding:1px 8px; }
@@ -142,6 +143,30 @@
       </div>
       <div class="row" style="margin-top:10px"><button class="b p" id="k_save">Karte speichern</button><button class="b" id="k_neu">Leeren</button> <span class="err" id="k_err"></span></div>
       <p class="hint">Das Bild wird nicht abgeschnitten: passt das Format nicht, füllt das Portal den Rand unscharf. Bitte nur Bilder nutzen, die ihr verwenden dürft (eigene Fotos, freie Lizenzen). Das Gerät holt Änderungen im WLAN von selbst. Jedes Thema hat einen eigenen Sammelstand, ein neues beginnt bei null Karten.</p>
+    </div>
+  </section>
+
+  <section id="raetsel">
+    <h2>Rätsel-Fragen</h2>
+    <p class="hint" id="q_info" style="margin-top:0"></p>
+    <div class="row" id="q_kats"></div>
+    <ul id="q_liste" style="margin-top:8px"></ul>
+    <div class="row" style="margin-top:10px"><button class="b p" id="q_neu">Neue Frage</button><button class="b" id="q_reset">Auf die eingebauten Fragen zurücksetzen</button></div>
+    <div id="q_form" hidden style="margin-top:14px">
+      <h3 id="q_formtitel" style="margin:0 0 6px">Neue Frage</h3>
+      <div class="grid">
+        <label>Kategorie <input type="text" id="q_kategorie" list="q_katlist" maxlength="24" placeholder="Tiere"></label>
+        <datalist id="q_katlist"></datalist>
+        <label>Schwierigkeit <select id="q_schwierigkeit"><option>leicht</option><option>mittel</option><option>fies</option></select></label>
+        <label class="wide">Frage <input type="text" id="q_frage" maxlength="110" placeholder="Wie viele Beine hat eine Spinne?"></label>
+        <label>Richtige Antwort <input type="text" id="q_a0" maxlength="30" placeholder="8"></label>
+        <label>Falsche Antwort <input type="text" id="q_a1" maxlength="30" placeholder="6"></label>
+        <label>Noch eine falsche <input type="text" id="q_a2" maxlength="30" placeholder="4"></label>
+        <label>Zählbild <select id="q_bild"><option value="">keins</option><option value="apfel">Äpfel</option><option value="stern">Sterne</option><option value="herz">Herzen</option><option value="ball">Bälle</option></select></label>
+        <label class="wide">Erklärung (kommt, wenn die Antwort falsch war) <input type="text" id="q_erklaerung" maxlength="170" placeholder="Spinnen haben 8 Beine, Insekten nur 6."></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="b p" id="q_save">Frage speichern</button><button class="b" id="q_cancel">Abbrechen</button> <span class="err" id="q_err"></span></div>
+      <p class="hint">Das Gerät mischt die Antworten. Zählbild: so viele Dinge, wie die richtige Antwort sagt (1 bis 12). Emojis kennt die Schrift auf dem Gerät nicht, Umlaute schon.</p>
     </div>
   </section>
 
@@ -374,6 +399,64 @@ $("k_save").onclick = async () => {
   } catch (e) { $("k_err").textContent = e.message; }
 };
 
+// ---- Rätsel-Fragen ----
+let fragen = null, qKat = "", qIndex = null;
+async function loadFragen() {
+  fragen = await (await fetch("/api/fragen")).json();
+  const f = fragen.fragen;
+  $("q_info").textContent = f.length + " Fragen, pro Runde kommen 5 davon." + (f.length < 15 ? " Mit mehr Fragen wiederholt sich weniger." : "")
+    + (fragen.probleme.length ? " Achtung: " + fragen.probleme.length + " Fragen haben Probleme." : "");
+  $("q_katlist").innerHTML = fragen.kategorien.map((k) => '<option value="' + esc(k) + '">').join("");
+  const kats = $("q_kats");
+  kats.innerHTML = "";
+  [""].concat(fragen.kategorien).forEach((k) => {
+    const b = document.createElement("button");
+    b.className = "b" + (qKat === k ? " p" : "");
+    b.textContent = (k || "Alle") + " " + (k ? f.filter((x) => x.kategorie === k).length : f.length);
+    b.onclick = () => { qKat = k; loadFragen(); };
+    kats.appendChild(b);
+  });
+  const ul = $("q_liste");
+  ul.innerHTML = "";
+  f.forEach((q, i) => {
+    if (qKat && q.kategorie !== qKat) return;
+    const li = document.createElement("li");
+    li.className = "src";
+    li.innerHTML = '<span class="name">' + esc(q.frage) + '<br><span class="hint">✓ ' + esc(q.antworten[q.richtig]) + " · ✗ "
+      + esc(q.antworten.filter((_, k) => k !== q.richtig).join(", ")) + "</span></span>"
+      + '<span class="tag">' + esc(q.kategorie) + " · " + q.schwierigkeit + (q.bild ? " · Bild" : "") + "</span>"
+      + '<button class="b">Bearbeiten</button><button class="b">Löschen</button>';
+    const bs = li.querySelectorAll("button");
+    bs[0].onclick = () => frageForm(q, i);
+    bs[1].onclick = async () => { if (confirm("Frage „" + q.frage + "“ löschen?")) { await post("/api/frage/loeschen", { index: i }); loadFragen(); } };
+    ul.appendChild(li);
+  });
+}
+function frageForm(q, i) {
+  qIndex = q ? i : null;
+  $("q_form").hidden = false;
+  $("q_formtitel").textContent = q ? "Frage bearbeiten" : "Neue Frage";
+  $("q_kategorie").value = q ? q.kategorie : qKat;
+  $("q_schwierigkeit").value = q ? q.schwierigkeit : "leicht";
+  $("q_frage").value = q ? q.frage : "";
+  const wrong = q ? q.antworten.filter((_, k) => k !== q.richtig) : ["", ""];
+  $("q_a0").value = q ? q.antworten[q.richtig] : ""; $("q_a1").value = wrong[0] || ""; $("q_a2").value = wrong[1] || "";
+  $("q_bild").value = q && q.bild ? q.bild.split(":")[2] : "";
+  $("q_erklaerung").value = q ? q.erklaerung : "";
+  $("q_err").textContent = "";
+  $("q_formtitel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("q_neu").onclick = () => frageForm(null);
+$("q_cancel").onclick = () => { $("q_form").hidden = true; };
+$("q_reset").onclick = async () => { if (confirm("Alle Änderungen verwerfen und die eingebauten Fragen nehmen?")) { await post("/api/fragen/zuruecksetzen"); loadFragen(); } };
+$("q_save").onclick = async () => {
+  const bild = $("q_bild").value;
+  const data = { index: qIndex, kategorie: $("q_kategorie").value.trim(), schwierigkeit: $("q_schwierigkeit").value, frage: $("q_frage").value.trim(),
+    antworten: [$("q_a0").value.trim(), $("q_a1").value.trim(), $("q_a2").value.trim()], erklaerung: $("q_erklaerung").value.trim() };
+  if (bild) data.bild = "zaehl:" + parseInt($("q_a0").value, 10) + ":" + bild;
+  try { await post("/api/frage", data); $("q_form").hidden = true; loadFragen(); } catch (e) { $("q_err").textContent = e.message; }
+};
+
 async function sourceAction(a, s, i) {
   const ids = state.quellen.map((q) => q.id);
   if (a === "hoch" || a === "runter") {
@@ -538,6 +621,7 @@ $("meine").onclick = async () => {
 
 refresh();
 loadAlben();
+loadFragen();
 setInterval(refresh, 3000);
 </script>
 </body>

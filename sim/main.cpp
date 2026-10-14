@@ -558,6 +558,16 @@ static int portalTest(const char* host) {
   printf("Wecker %s %d:%02d Tage %02x Ton %s, Nachtlicht %s, %d Dateien für die SD-Karte\n", gRadio.alarmOn ? "an" : "aus", gRadio.alarmMin / 60, gRadio.alarmMin % 60,
          gRadio.alarmDays, gRadio.alarmTone, gRadio.nightLight ? "an" : "aus", gRadio.nFiles);
   printf("Post: %d Nachrichten (%d neu), %d Kontakte\n", gMsgs.count(), gMsgs.unheard(), gMsgs.contacts());
+  {   // Rätsel-Fragen aus dem Portal
+    std::vector<uint8_t> raw;
+    if (gRadio.quizVersion && portalDownload(host, 8770, "/fragen.txt", PortalImages::sink, &raw)) {
+      raw.push_back(0);
+      QuizPack qp;
+      qp.load(reinterpret_cast<char*>(raw.data()));
+      Question q;
+      printf("Fragen (Version %08x): %d, %d Kategorien, erste: „%s“\n", unsigned(gRadio.quizVersion), qp.count(), qp.categories(), qp.get(0, q) ? q.q : "-");
+    }
+  }
   Message msg;
   Contact con;
   if (gMsgs.newest(msg)) {   // anhören: Clip läuft über den Tonstrom
@@ -657,10 +667,21 @@ int main(int argc, char** argv) {
   static std::mutex albumMu;
   static std::string albumText, albumKey;   // vom Netz-Thread geholt, im Hauptthread geladen
   static bool albumNew = false;
+  static std::string quizText;   // Rätsel-Fragen vom Portal
+  static bool quizNew = false;
   std::thread([] {
     std::string have;
     for (;;) {
       std::this_thread::sleep_for(std::chrono::seconds(2));
+      static uint32_t quizHave = 0;
+      std::vector<uint8_t> qraw;
+      if (gRadio.quizVersion && gRadio.quizVersion != quizHave && portalDownload(portalHost.c_str(), 8770, "/fragen.txt", PortalImages::sink, &qraw)) {
+        qraw.push_back(0);
+        std::lock_guard<std::mutex> g(albumMu);
+        quizText = reinterpret_cast<char*>(qraw.data());
+        quizNew = true;
+        quizHave = gRadio.quizVersion;
+      }
       if (!gRadio.albumTheme[0]) continue;
       char key[48];
       snprintf(key, sizeof key, "%s %08x", gRadio.albumTheme, unsigned(gRadio.albumVersion));
@@ -732,6 +753,13 @@ int main(int argc, char** argv) {
     in.epoch = int64_t(tt) + lt.tm_gmtoff;   // Ortszeit, wie sie später der Companion schickt
     {
       std::lock_guard<std::mutex> g(albumMu);
+      if (quizNew) {   // neue Rätsel-Fragen vom Portal (Text muss leben, solange das Paket ihn nutzt)
+        quizNew = false;
+        static std::string live;
+        live = quizText;
+        kids.pack.load(live.c_str());
+        printf("Fragen: %d\n", kids.pack.count());
+      }
       if (albumNew) {   // neues Kartenthema vom Portal
         albumNew = false;
         const bool builtin = albumKey.rfind("pferde ", 0) == 0;

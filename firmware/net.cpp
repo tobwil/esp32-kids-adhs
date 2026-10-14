@@ -346,6 +346,30 @@ static void syncAlbum() {
   Serial.printf("album: Thema %s geladen\n", radio->albumTheme);
 }
 
+// ---------------- Rätsel-Fragen vom Portal ----------------
+// /quiz.txt wie beim Hochladen per USB (tools/quiz.py), /quiz.ver merkt sich die Version des Portals
+
+static volatile bool quizReload = false;
+
+static void syncQuiz() {
+  if (!radio->quizVersion || !LittleFS.totalBytes()) return;
+  char want[12];
+  snprintf(want, sizeof want, "%08lx", (unsigned long)radio->quizVersion);
+  File v = LittleFS.open("/quiz.ver", "r");
+  const String have = v ? v.readString() : String();
+  if (v) v.close();
+  if (have == want) return;
+  if (!download("/fragen.txt", "/quiz.tmp")) return;
+  LittleFS.remove("/quiz.txt");
+  LittleFS.rename("/quiz.tmp", "/quiz.txt");
+  File w = LittleFS.open("/quiz.ver", "w");
+  if (w) { w.print(want); w.close(); }
+  quizReload = true;
+  Serial.println("fragen: neuer Katalog vom Portal");
+}
+
+bool netTakeQuizReload() { const bool r = quizReload; quizReload = false; return r; }
+
 bool netAlbumTheme() {
   if (albumOwn < 0) {   // geladenes Thema vom letzten Mal (vor netBegin abfragbar)
     const String st = readStand();
@@ -374,7 +398,7 @@ static void netTask(void*) {
     }
     if (!portalIp[0] || (!radio->online() && millis() - lastFind > 30000)) findPortal();
     if (!portalIp[0]) { radio->setOnline(false); vTaskDelay(pdMS_TO_TICKS(3000)); continue; }
-    if (portalPoll(*radio, msgs, portalIp, portalPort)) { syncAlbum(); syncOffline(); }
+    if (portalPoll(*radio, msgs, portalIp, portalPort)) { syncAlbum(); syncQuiz(); syncOffline(); }
     vTaskDelay(pdMS_TO_TICKS(radio->playing() ? 1000 : 2000));
   }
 }
