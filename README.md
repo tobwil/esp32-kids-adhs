@@ -26,7 +26,7 @@ Unter Grummel liegen die App-Symbole. Jede App öffnet bildschirmfüllend. Wisch
 | Atmen | ein Ballon atmet mit: 4 s ein, 5 s aus, 4 Runden |
 | Kugel ins Loch | Kugeln ins Loch rollen, per Finger als Joystick oder per Neigen. Jede Runde hat ihre Landschaft (Wiese, Strand, Holztisch, Nachthimmel). Ohne Zeitdruck, nach 4 Runden kommt eine Pause |
 | Rätsel | 5 Fragen pro Runde für die 2. Klasse (Rechnen bis 100, Zählen mit Bild, Tiere und Natur, Zeit, Sprache, Körper). Bei Zählbildern hilft Antippen beim Mitzählen. Ab drei gesammelten Pferdekarten kommt eine Bonusfrage „Welches Pferd ist das?“ mit Foto aus dem Album. Bei falscher Antwort zeigt das Gerät freundlich die Lösung und wartet. Ein Stern pro Runde, egal wie viele richtig waren |
-| Pferde-Album | 24 Pferderassen als Sammelkarten mit Foto, Typ, Herkunft, Größe, Farben, Wesen und „Wusstest du?“. Alle 3 Sterne aus den Übungen gibt es eine neue Karte, nie doppelt |
+| Sammelalbum | Sammelkarten mit Foto und Infos, eingebaut sind 24 Pferderassen (Typ, Herkunft, Größe, Farben, Wesen, „Wusstest du?“). Eigene Themen (Dinos, Katzen, …) mit eigenen Bildern legen die Eltern im Portal an. Alle 3 Sterne aus den Übungen gibt es eine neue Karte, nie doppelt. Jedes Thema hat einen eigenen Sammelstand |
 | Radio | Sender aus dem Eltern-Portal: eigene Aufnahmen (Gute-Nacht-Geschichten, Hörspiele) und Spotify-Playlists. Großer Abspielknopf, Pfeile wechseln den Sender, − und + die Lautstärke (höchstens so laut, wie die Eltern erlauben). Ein Schlaf-Timer blendet nach der eingestellten Zeit langsam aus |
 
 Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestaltungsregeln: ruhige Bilder, nichts blinkt, kurze Runden ohne Zeitdruck, keine Ranglisten, freundliche Rückmeldungen, Ton startet aus.
@@ -40,7 +40,7 @@ Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestalt
 | nach oben wischen | nächste App (vom Dashboard aus: die erste) |
 | nach unten wischen | vorige App, vor der ersten kommt das Dashboard |
 | nach links oder rechts wischen | App schließen, zurück zum Dashboard |
-| 3 s lang drücken oder BOOT | Einstellungen für Eltern (Liste lässt sich verschieben): Einstellungen der offenen App, Ton, Helligkeit, Sperre, WLAN |
+| 3 s lang drücken oder BOOT | Einstellungen für Eltern (Liste lässt sich verschieben): Einstellungen der offenen App, Ton, Helligkeit, Sperre, Apps an/aus, WLAN |
 
 Beim Kugelspiel steuert der Finger die Kugel. Dort wirkt Wischen nur, wenn es am Bildschirmrand beginnt, ebenso auf Grummel selbst (dort ist es Streicheln). Gedimmt reagiert das Gerät normal, nur aus dem Schwarzen heraus weckt die erste Berührung bloß auf.
 
@@ -96,6 +96,8 @@ tools/.venv/bin/python tools/portal/portal.py
 
 Dann `http://127.0.0.1:8770` am Mac oder `http://<mac-name>.local:8770` vom Handy. Dort:
 
+- **Apps** einzeln an- und abschalten (abgeschaltete verschwinden vom Dashboard und sind auch per Wischen nicht erreichbar)
+- **Sammelalbum:** aktives Thema wählen, eigene Themen anlegen (Titel, Name auf dem Dashboard, Rätselfrage, Überschriften der Rückseite), Karten mit Bild anlegen und bearbeiten. Bilder werden nicht abgeschnitten (Rand unscharf gefüllt, braucht Pillow aus `tools/.venv`). Das Gerät lädt das aktive Thema im WLAN von selbst in seinen Speicher (`/album`, höchstens 48 Karten), neue Themen beginnen bei null Karten
 - **Sperre** aus, „Nur Radio“ oder nach Zeitplan
 - **Sender** anlegen, umbenennen, sortieren, entfernen; höchste Lautstärke, Schlaf-Timer
 - **Aufnahmen** direkt im Browser aufnehmen (am Mac unter 127.0.0.1, Browser verlangen dafür eine sichere Adresse) oder Dateien hochladen (MP3, M4A, Sprachmemo …). ffmpeg wandelt sie in 16 kHz mono um und gleicht die Lautheit an.
@@ -112,7 +114,7 @@ Das Portal meldet sich per Bonjour als `_grummel._tcp` an, das Gerät findet es 
 
 Alles, was das Portal speichert (Aufnahmen, Einstellungen, Spotify-Anmeldung), liegt in `tools/portal/daten/` und nicht im Repository.
 
-Test ohne Gerät: `sim/dksim --portal-test` holt die Sender vom laufenden Portal, spielt den ersten 3 s ab und misst den Ton. Im interaktiven Simulator spielt das Radio über die Mac-Lautsprecher (Portal-Adresse in `DK_PORTAL`, sonst 127.0.0.1).
+Test ohne Gerät: `sim/dksim --portal-test` holt Sender und Kartenthema vom laufenden Portal, spielt den ersten Sender 3 s ab, misst den Ton und zählt die Kartenbilder. Im interaktiven Simulator spielt das Radio über die Mac-Lautsprecher (Portal-Adresse in `DK_PORTAL`, sonst 127.0.0.1).
 
 ## Rätsel-Fragen austauschen
 

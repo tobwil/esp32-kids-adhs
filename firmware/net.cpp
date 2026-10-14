@@ -1,6 +1,7 @@
 #include "net.h"
 
 #include <DNSServer.h>
+#include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -155,6 +156,99 @@ static void findPortal() {
 
 static const char* streamHost() { return portalIp; }
 
+// ---------------- Sammelalbum vom Portal ----------------
+// /stand.txt: „<thema> <version>“ des geladenen Themas. Neues Thema: erst nach /aneu laden, dann gegen /album tauschen.
+static volatile bool albumReload = false;
+static int albumOwn = -1;   // -1: noch nicht nachgesehen
+
+static String readStand() {
+  File f = LittleFS.open("/stand.txt", "r");
+  if (!f) return "";
+  String s = f.readString();
+  f.close();
+  s.trim();
+  return s;
+}
+
+static void writeStand(const char* s) {
+  File f = LittleFS.open("/stand.txt", "w");
+  if (f) { f.print(s); f.close(); }
+}
+
+static void clearDir(const char* dir) {
+  File d = LittleFS.open(dir);
+  if (!d || !d.isDirectory()) return;
+  String names[64];
+  int n = 0;
+  for (File f = d.openNextFile(); f && n < 64; f = d.openNextFile()) { names[n++] = String(dir) + "/" + f.name(); f.close(); }
+  d.close();
+  for (int i = 0; i < n; i++) LittleFS.remove(names[i]);
+  LittleFS.rmdir(dir);
+}
+
+static bool toFile(void* ctx, const uint8_t* data, int n) { return static_cast<File*>(ctx)->write(data, n) == size_t(n); }
+
+static bool download(const char* path, const char* file) {
+  if (LittleFS.totalBytes() - LittleFS.usedBytes() < 80 * 1024) return false;   // Platz für Datei und Dateisystem lassen
+  File f = LittleFS.open(file, "w");
+  if (!f) return false;
+  const bool ok = portalDownload(portalIp, portalPort, path, toFile, &f);
+  f.close();
+  if (!ok) LittleFS.remove(file);
+  return ok;
+}
+
+static void syncAlbum() {
+  if (!radio->albumTheme[0] || !LittleFS.totalBytes()) return;
+  char want[48];
+  snprintf(want, sizeof want, "%s %08lx", radio->albumTheme, (unsigned long)radio->albumVersion);
+  if (readStand() == want) return;
+  if (!strcmp(radio->albumTheme, "pferde")) {   // zurück zu den eingebauten Pferden
+    writeStand(want);
+    albumOwn = false;
+    albumReload = true;
+    return;
+  }
+  clearDir("/aneu");
+  LittleFS.mkdir("/aneu");
+  if (!download("/album/karten.txt", "/aneu/karten.txt")) { clearDir("/aneu"); return; }
+  // Bilder laut Kopfzeile „#bilder 1,2,5“
+  File t = LittleFS.open("/aneu/karten.txt", "r");
+  String ids;
+  while (t.available()) {
+    const String line = t.readStringUntil('\n');
+    if (line.startsWith("#bilder ")) { ids = line.substring(8); break; }
+  }
+  t.close();
+  int start = 0;
+  while (start < int(ids.length())) {
+    int end = ids.indexOf(',', start);
+    if (end < 0) end = ids.length();
+    const int id = ids.substring(start, end).toInt();
+    start = end + 1;
+    if (id <= 0) continue;
+    char path[40], file[24];
+    snprintf(path, sizeof path, "/album/bild/%d.jpg", id);
+    snprintf(file, sizeof file, "/aneu/%d.jpg", id);
+    if (!download(path, file)) { clearDir("/aneu"); return; }   // nächster Versuch bei der nächsten Abfrage
+  }
+  clearDir("/album");
+  LittleFS.rename("/aneu", "/album");
+  writeStand(want);
+  albumOwn = true;
+  albumReload = true;
+  Serial.printf("album: Thema %s geladen\n", radio->albumTheme);
+}
+
+bool netAlbumTheme() {
+  if (albumOwn < 0) {   // geladenes Thema vom letzten Mal (vor netBegin abfragbar)
+    const String st = readStand();
+    albumOwn = st.length() && !st.startsWith("pferde ") && LittleFS.exists("/album/karten.txt");
+  }
+  return albumOwn > 0;
+}
+bool netTakeAlbumReload() { const bool r = albumReload; albumReload = false; return r; }
+
 static void netTask(void*) {
   connect();
   for (;;) {
@@ -174,7 +268,7 @@ static void netTask(void*) {
     }
     if (!portalIp[0] || (!radio->online() && millis() - lastFind > 30000)) findPortal();
     if (!portalIp[0]) { radio->setOnline(false); vTaskDelay(pdMS_TO_TICKS(3000)); continue; }
-    portalPoll(*radio, portalIp, portalPort);
+    if (portalPoll(*radio, portalIp, portalPort)) syncAlbum();
     vTaskDelay(pdMS_TO_TICKS(radio->playing() ? 1000 : 2000));
   }
 }

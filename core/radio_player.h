@@ -9,6 +9,8 @@
 //   schlaf <minuten, 0 = aus>
 //   quelle <id> <aufnahme|spotify> <name …>
 //   hinweis <text …>            (z. B. „Spotify ist nicht verbunden“)
+//   apps <maske>                abgeschaltete Kacheln (Bit je Index)
+//   album <thema> <version>     aktives Kartenthema (eingebaut: „pferde 0“), Version ändert sich bei jeder Bearbeitung
 // Ton: GET /radio/<id>.pcm liefert 16 Bit mono mit Synth::RATE (Spotify: ein gemeinsamer Live-Strom /radio/spotify.pcm).
 #pragma once
 #include <atomic>
@@ -78,6 +80,9 @@ class RadioPlayer {
   int64_t epoch = 0;                  // 0 = unbekannt
   int lockMode = -1, lockFrom = 0, lockTo = 0;   // -1 = noch nichts vom Portal
   int sleepMin = 0;
+  long appsOff = -1;                  // -1 = noch nichts vom Portal
+  char albumTheme[24] = "";
+  uint32_t albumVersion = 0;
 
   // ---- Audio-Thread ----
   void mix(int16_t* mono, int n);     // Radio dazumischen

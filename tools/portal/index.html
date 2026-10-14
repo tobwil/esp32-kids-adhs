@@ -9,6 +9,8 @@
   @media (prefers-color-scheme: dark) { :root { --bg:#14121c; --card:#1e1b2a; --ink:#ece8f6; --dim:#9a94b4; --line:#2e2a40; --acc:#a08cff; --acc2:#2a2545; --ok:#5fd08e; --warn:#ff9a6a; } }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
+  input, select, audio { max-width:100%; }
+  code, a { overflow-wrap:anywhere; }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   main { max-width:760px; margin:0 auto; padding:20px 16px 60px; }
   h1 { font-size:24px; margin:4px 0 2px; } h2 { font-size:18px; margin:0 0 12px; }
@@ -35,6 +37,18 @@
   ol { padding-left:20px; margin:8px 0; } ol li { margin:4px 0; }
   audio { height:32px; max-width:220px; }
   .rec { color:var(--warn); font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .grid label { display:flex; flex-direction:column; gap:4px; font-size:14px; color:var(--dim); }
+  .grid label.wide { grid-column:1 / -1; }
+  .grid input[type=text] { width:100%; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  .card { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--bg); }
+  .card img, .card .noimg { width:100%; aspect-ratio:328/196; object-fit:cover; display:block; background:var(--acc2); }
+  .card .noimg { display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:13px; }
+  .card div.t { padding:6px 8px; font-weight:600; font-size:14px; }
+  .card div.r { display:flex; gap:6px; padding:0 8px 8px; }
+  .card button { font-size:13px; padding:4px 8px; }
+  label.chk { display:inline-flex; gap:6px; align-items:center; padding:4px 10px; border:1px solid var(--line); border-radius:999px; }
   code { background:var(--acc2); padding:1px 6px; border-radius:6px; font-size:14px; }
 </style>
 </head>
@@ -55,6 +69,48 @@
       <label>bis <input type="time" id="bis"></label>
     </div>
     <p class="hint">Gesperrt zeigt das Gerät nur das Radio, Wischen geht nicht. Am Gerät entsperren: 8 Sekunden auf den Bildschirm drücken, dann „Sperre“ antippen.</p>
+  </section>
+
+  <section>
+    <h2>Apps</h2>
+    <div id="apps" class="row"></div>
+    <p class="hint">Abgeschaltete Apps verschwinden vom Dashboard und lassen sich nicht erreichen. Am Gerät geht das auch in den Einstellungen.</p>
+  </section>
+
+  <section id="album">
+    <h2>Sammelalbum</h2>
+    <ul id="alben"></ul>
+    <div class="row" style="margin-top:10px"><button class="b" id="neualbum">Neues Thema</button></div>
+    <div id="themaform" hidden style="margin-top:14px">
+      <div class="grid">
+        <label>Titel <input type="text" id="t_titel" placeholder="Dino-Album" maxlength="28"></label>
+        <label>Name auf dem Dashboard <input type="text" id="t_symbol" placeholder="Dinos" maxlength="12"></label>
+        <label>Zählwort („3 von 24 …“) <input type="text" id="t_zaehlwort" placeholder="Dinos" maxlength="14"></label>
+        <label>Frage im Rätsel <input type="text" id="t_frage" placeholder="Welcher Dino ist das?" maxlength="40"></label>
+        <label>Rückseite, 1. Überschrift <input type="text" id="t_u3" placeholder="Nahrung" maxlength="20"></label>
+        <label>Rückseite, 2. Überschrift <input type="text" id="t_u4" placeholder="Lebte vor" maxlength="20"></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="b p" id="t_save">Thema speichern</button><button class="b" id="t_cancel">Abbrechen</button></div>
+    </div>
+    <div id="karten" hidden style="margin-top:16px">
+      <h2 id="k_titel"></h2>
+      <div class="row" style="margin:-4px 0 12px"><button class="b" id="k_thema">Titel und Überschriften ändern</button></div>
+      <div id="kliste" class="cards"></div>
+      <h3 id="k_formtitel" style="margin:16px 0 6px">Neue Karte</h3>
+      <div class="grid">
+        <label>Name <input type="text" id="k_name" maxlength="30" placeholder="Triceratops"></label>
+        <label>Untertitel <input type="text" id="k_untertitel" maxlength="30" placeholder="Pflanzenfresser"></label>
+        <label>Zeile 1 <input type="text" id="k_zeile1" maxlength="60" placeholder="Kreidezeit, Nordamerika"></label>
+        <label>Zeile 2 <input type="text" id="k_zeile2" maxlength="40" placeholder="Länge: etwa 9 Meter"></label>
+        <label><span id="k_l3">Rückseite 1</span> <input type="text" id="k_text3" maxlength="90"></label>
+        <label><span id="k_l4">Rückseite 2</span> <input type="text" id="k_text4" maxlength="90"></label>
+        <label class="wide">Wusstest du? <input type="text" id="k_wusstest" maxlength="160" placeholder="Seine drei Hörner …"></label>
+        <label>Bildnachweis <input type="text" id="k_foto" maxlength="90" placeholder="Foto: eigenes Bild"></label>
+        <label>Bild <input type="file" id="k_bild" accept="image/*"></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="b p" id="k_save">Karte speichern</button><button class="b" id="k_neu">Leeren</button> <span class="err" id="k_err"></span></div>
+      <p class="hint">Das Bild wird nicht abgeschnitten: passt das Format nicht, füllt das Portal den Rand unscharf. Bitte nur Bilder nutzen, die ihr verwenden dürft (eigene Fotos, freie Lizenzen). Das Gerät holt Änderungen im WLAN von selbst. Jedes Thema hat einen eigenen Sammelstand, ein neues beginnt bei null Karten.</p>
+    </div>
   </section>
 
   <section>
@@ -98,7 +154,7 @@
       <ol>
         <li><code>brew install librespot</code> im Terminal, dann das Portal neu starten.</li>
         <li>Auf <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> eine App anlegen (Web API). Redirect-URI: <code>http://127.0.0.1:8770/spotify/callback</code></li>
-        <li>Die Client-ID hier eintragen: <span class="row" style="display:inline-flex"><input type="text" id="cid" placeholder="Client-ID" size="34"> <button class="b" id="cidsave">Speichern</button></span></li>
+        <li>Die Client-ID hier eintragen: <div class="row" style="margin-top:4px"><input type="text" id="cid" placeholder="Client-ID"> <button class="b" id="cidsave">Speichern</button></div></li>
         <li>Am Mac <a class="b p" href="/spotify/login">Mit Spotify verbinden</a> (nur unter 127.0.0.1)</li>
         <li>In der Spotify-App einmal „Grummel-Radio“ als Lautsprecher auswählen (Mac und Handy im selben WLAN).</li>
       </ol>
@@ -163,6 +219,7 @@ async function refresh() {
     });
   }
   $("leer").style.display = state.quellen.length ? "none" : "";
+  renderApps();
 
   const sp = state.spotify;
   $("spstatus").innerHTML = "librespot: " + esc(sp.librespot) + " · Web-API: " + (sp.verbunden ? "verbunden" : "nicht verbunden")
@@ -171,6 +228,116 @@ async function refresh() {
   if (document.activeElement !== $("cid")) $("cid").value = sp.client_id;
   $("spsetup").style.display = sp.verbunden && sp.librespot === "läuft" ? "none" : "";
 }
+
+// ---- Apps ----
+function renderApps() {
+  const box = $("apps");
+  if (box.contains(document.activeElement)) return;
+  box.innerHTML = "";
+  state.apps.forEach((a) => {
+    const l = document.createElement("label");
+    l.className = "chk";
+    l.innerHTML = '<input type="checkbox"' + (a.an ? " checked" : "") + "> " + esc(a.name);
+    l.querySelector("input").onchange = () => {
+      let mask = 0;
+      box.querySelectorAll("input").forEach((c, i) => { if (!c.checked) mask |= 1 << state.apps[i].index; });
+      saveSettings({ apps_aus: mask });
+    };
+    box.appendChild(l);
+  });
+}
+
+// ---- Sammelalbum ----
+let alben = null, offen = null, karteId = 0;
+async function loadAlben() {
+  alben = await (await fetch("/api/alben")).json();
+  const ul = $("alben");
+  ul.innerHTML = "";
+  const list = [{ id: "pferde", titel: "Pferde-Album (eingebaut)", karten: null }].concat(alben.alben);
+  list.forEach((a) => {
+    const li = document.createElement("li");
+    li.className = "src";
+    li.innerHTML = '<label class="name"><input type="radio" name="aktiv"' + (alben.aktiv === a.id ? " checked" : "") + "> " + esc(a.titel) + "</label>"
+      + (a.karten ? '<span class="tag">' + a.karten.length + " Karten</span>" + '<button class="b">Bearbeiten</button><button class="b">Löschen</button>' : '<span class="tag">24 Pferde</span>');
+    li.querySelector("input").onchange = async () => { await post("/api/album/aktiv", { id: a.id }); loadAlben(); };
+    const bs = li.querySelectorAll("button");
+    if (bs.length) {
+      bs[0].onclick = () => openAlbum(a.id);
+      bs[1].onclick = async () => { if (confirm("Thema „" + a.titel + "“ mit allen Karten löschen?")) { await post("/api/album/loeschen", { id: a.id }); if (offen === a.id) closeAlbum(); loadAlben(); } };
+    }
+    ul.appendChild(li);
+  });
+  if (offen) openAlbum(offen, true);
+}
+function themeForm(a) {
+  $("themaform").hidden = false;
+  $("themaform").dataset.id = a ? a.id : "";
+  $("t_titel").value = a ? a.titel : ""; $("t_symbol").value = a ? a.symbol : ""; $("t_zaehlwort").value = a ? a.zaehlwort : "";
+  $("t_frage").value = a ? a.frage : ""; $("t_u3").value = a ? a.ueberschrift3 : ""; $("t_u4").value = a ? a.ueberschrift4 : "";
+}
+$("neualbum").onclick = () => { closeAlbum(); themeForm(null); $("t_titel").focus(); };
+$("t_cancel").onclick = () => { $("themaform").hidden = true; };
+$("t_save").onclick = async () => {
+  try {
+    const j = await post("/api/album/speichern", { id: $("themaform").dataset.id, titel: $("t_titel").value, symbol: $("t_symbol").value,
+      zaehlwort: $("t_zaehlwort").value, frage: $("t_frage").value, ueberschrift3: $("t_u3").value, ueberschrift4: $("t_u4").value });
+    $("themaform").hidden = true;
+    offen = j.id;
+    loadAlben();
+  } catch (e) { alert(e.message); }
+};
+function closeAlbum() { offen = null; $("karten").hidden = true; }
+function openAlbum(id, keepForm) {
+  const a = alben.alben.find((x) => x.id === id);
+  if (!a) return closeAlbum();
+  offen = id;
+  $("karten").hidden = false;
+  $("k_titel").textContent = a.titel;
+  $("k_thema").onclick = () => themeForm(a);
+  $("k_l3").textContent = a.ueberschrift3 || "Rückseite 1";
+  $("k_l4").textContent = a.ueberschrift4 || "Rückseite 2";
+  const box = $("kliste");
+  box.innerHTML = "";
+  a.karten.forEach((k) => {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = (k.bild ? '<img src="/alben/' + a.id + "/" + k.id + ".jpg?v=" + Date.now() + '" alt="">' : '<div class="noimg">noch kein Bild</div>')
+      + '<div class="t">' + esc(k.name) + '</div><div class="r"><button class="b">Bearbeiten</button><button class="b">Löschen</button></div>';
+    const bs = d.querySelectorAll("button");
+    bs[0].onclick = () => cardForm(k);
+    bs[1].onclick = async () => { if (confirm("Karte „" + k.name + "“ löschen?")) { await post("/api/album/karte/loeschen", { album: a.id, id: k.id }); loadAlben(); } };
+    box.appendChild(d);
+  });
+  if (!a.karten.length) box.innerHTML = '<p class="hint">Noch keine Karten. Unten die erste anlegen.</p>';
+  if (!keepForm) cardForm(null);
+}
+const KF = ["name", "untertitel", "zeile1", "zeile2", "text3", "text4", "wusstest", "foto"];
+function cardForm(k) {
+  karteId = k ? k.id : 0;
+  KF.forEach((f) => $("k_" + f).value = k ? (k[f] || "") : "");
+  $("k_bild").value = "";
+  $("k_formtitel").textContent = k ? "Karte „" + k.name + "“ bearbeiten" : "Neue Karte";
+  $("k_err").textContent = "";
+  if (k) $("k_formtitel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("k_neu").onclick = () => cardForm(null);
+$("k_save").onclick = async () => {
+  $("k_err").textContent = "";
+  try {
+    const data = { album: offen, id: karteId };
+    KF.forEach((f) => data[f] = $("k_" + f).value);
+    const j = await post("/api/album/karte", data);
+    const file = $("k_bild").files[0];
+    if (file) {
+      $("k_err").textContent = "Bild wird vorbereitet …";
+      const r = await fetch("/api/album/bild?album=" + encodeURIComponent(offen) + "&karte=" + j.id, { method: "POST", body: file });
+      const jj = await r.json().catch(() => ({ ok: false, fehler: "Antwort unlesbar" }));
+      if (!jj.ok) throw new Error(jj.fehler);
+    }
+    cardForm(null);
+    await loadAlben();
+  } catch (e) { $("k_err").textContent = e.message; }
+};
 
 async function sourceAction(a, s, i) {
   const ids = state.quellen.map((q) => q.id);
@@ -259,6 +426,7 @@ $("meine").onclick = async () => {
 };
 
 refresh();
+loadAlben();
 setInterval(refresh, 3000);
 </script>
 </body>

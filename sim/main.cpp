@@ -32,6 +32,7 @@
 #include "radio.h"
 #include "portal_net.h"
 #include "portal_sync.h"
+#include <mutex>
 #include <thread>
 
 using namespace dk;
@@ -161,6 +162,30 @@ struct FileImages : ImageStore {
   Image thumb(int id) override { return get(thumbs, id, "_t.rgb", THUMB_W, THUMB_H); }
 };
 
+// Kartenbilder eines Portal-Themas: RGB565-Rohdaten vom Portal (der Simulator dekodiert kein JPEG)
+struct PortalImages : ImageStore {
+  std::string host = "127.0.0.1";
+  std::map<int, std::vector<uint16_t>> cards, thumbs;
+  static bool sink(void* ctx, const uint8_t* d, int n) { auto* v = static_cast<std::vector<uint8_t>*>(ctx); v->insert(v->end(), d, d + n); return true; }
+  Image get(std::map<int, std::vector<uint16_t>>& m, int id, bool thumb) {
+    auto it = m.find(id);
+    if (it == m.end()) {
+      std::vector<uint8_t> raw;
+      char path[48];
+      snprintf(path, sizeof path, "/album/bild/%d%s.rgb", id, thumb ? "_t" : "");
+      const size_t want = size_t(thumb ? THUMB_W * THUMB_H : CARD_W * CARD_H) * 2;
+      std::vector<uint16_t> px;
+      if (portalDownload(host.c_str(), 8770, path, sink, &raw) && raw.size() == want) { px.resize(want / 2); std::memcpy(px.data(), raw.data(), want); }
+      it = m.emplace(id, std::move(px)).first;
+    }
+    if (it->second.empty()) return {};
+    return {it->second.data(), thumb ? THUMB_W : CARD_W, thumb ? THUMB_H : CARD_H};
+  }
+  Image card(int id) override { return get(cards, id, false); }
+  Image thumb(int id) override { return get(thumbs, id, true); }
+  void reload() override { cards.clear(); thumbs.clear(); }
+};
+
 // Kinder-Aufbau: 0 Dashboard, 1 Check-in, 2 Grummel, 3 Atmen, 4 Kugel ins Loch, 5 Pferde-Album, 6 Rätsel, 7 Radio
 enum { T_HOME, T_CHECKIN, T_GRUMMEL, T_BREATHE, T_BALANCE, T_ALBUM, T_RIDDLE, T_RADIO };
 static const Home::AppIcon APPS[] = {{"Gefühle", T_CHECKIN, 0}, {"Grummel", T_GRUMMEL, 1}, {"Atmen", T_BREATHE, 2}, {"Kugel", T_BALANCE, 3},
@@ -198,6 +223,7 @@ struct Kids {
     riddle.setPack(&pack);
     riddle.setAlbum(&album, &images);
     home.setApps(APPS, 7);
+    home.setAlbum(&album);
     home.setCheckIn(T_CHECKIN);
     checkin.setTargets(T_GRUMMEL, T_BREATHE);
   }
@@ -388,6 +414,29 @@ static int screens(const char* dir) {
   if (!app.settingsOpen()) printf("  FEHLER: Sperre: Einstellungen nach 8 s fehlen\n"), nIssues++;
   app.setLock(0, 1170, 420); sc.tap(184, 30); sc.run(1.0f);
   if (app.current() != T_HOME) printf("  FEHLER: nach Entsperren nicht aufs Dashboard (%d)\n", app.current()), nIssues++;
+  // eigenes Kartenthema (Format 2, ohne Bilder) und eine abgeschaltete App
+  {
+    static const char DINOS[] = "#album dinos\n#titel Dino-Album\n#symbol Dinos\n#zaehlwort Dinos\n#frage Welcher Dino ist das?\n#format 2\n"
+        "1|Triceratops|Pflanzenfresser|Kreidezeit, Nordamerika|Länge: etwa 9 m|Nahrung|Farne und Palmfarne|Lebte vor|68 Millionen Jahren|Seine drei Hörner halfen ihm bei der Verteidigung.|Foto: eigenes Bild\n"
+        "2|Brachiosaurus|Pflanzenfresser|Jurazeit, Nordamerika|Höhe: etwa 13 m|Nahrung|Blätter hoher Bäume|Lebte vor|150 Millionen Jahren|Er war so hoch wie ein Haus mit vier Stockwerken.|\n"
+        "3|T-Rex|Fleischfresser|Kreidezeit|Länge: etwa 12 m|Nahrung|andere Dinosaurier|Lebte vor|67 Millionen Jahren||\n";
+    kids.album.setImages(nullptr);   // Thema ohne Bilder: Platzhalter
+    kids.album.load(DINOS);
+    if (kids.album.count() != 3 || kids.album.pending() != 0) printf("  FEHLER: neues Thema: %d Karten, %d wartend (soll 3, 0)\n", kids.album.count(), kids.album.pending()), nIssues++;
+    for (int k = 0; k < 3; k++) starsAdd(store);
+    app.setDisabled(1u << T_BALANCE);
+    app.show(T_HOME); sc.run(0.6f); shot("33_dashboard_dinos_ohne_kugel");
+    if (kids.album.pending() != 1) printf("  FEHLER: nach 3 Sternen keine Dino-Karte\n"), nIssues++;
+    for (int k = 0; k < 4; k++) swipe(300, 400, 300, 250);   // Gefühle, Grummel, Atmen, (Kugel ist aus) Album
+    if (app.current() != T_ALBUM) printf("  FEHLER: Wischen überspringt abgeschaltete App nicht (%d)\n", app.current()), nIssues++;
+    app.show(T_ALBUM); sc.run(0.6f); sc.tap(184, 214); sc.run(1.2f); shot("34_dino_vorne");
+    sc.tap(184, 214); sc.run(0.6f); shot("35_dino_hinten");
+    sc.tap(184, 214); sc.run(0.6f); shot("36_dino_album");
+    app.setDisabled(0);
+    kids.album.setImages(&kids.images);
+    kids.album.load(ALBUM_BUILTIN);
+    close();
+  }
   // Einstellungen: 3 s auf eine freie Stelle drücken
   sc.touch(true, 30, 230); sc.run(3.4f); sc.touch(false, 30, 230); sc.frame(); sc.run(0.5f); shot("25_einstellungen");
   swipe(184, 380, 184, 120); sc.run(0.3f); shot("25b_einstellungen_unten");
@@ -442,6 +491,21 @@ static int portalTest(const char* host) {
     for (int16_t v : buf) { sum += double(v) * v; cnt++; }
   }
   portalPoll(gRadio, host, 8770);   // schickt auch die Befehle (play) ans Portal
+  printf("Album-Thema: %s (Version %08x)\n", gRadio.albumTheme, unsigned(gRadio.albumVersion));
+  if (std::strcmp(gRadio.albumTheme, "pferde") != 0) {
+    std::vector<uint8_t> raw;
+    if (portalDownload(host, 8770, "/album/karten.txt", PortalImages::sink, &raw)) {
+      raw.push_back(0);
+      Synth synth; FileStore store("");
+      Album a(synth, store, 1);
+      PortalImages pi; pi.host = host;
+      a.load(reinterpret_cast<char*>(raw.data()));
+      printf("  %s: %d Karten, Dashboard „%s“, Frage „%s“\n", a.title(), a.count(), a.shortName(), a.question());
+      int withImg = 0;
+      for (int i = 0; i < a.count(); i++) withImg += pi.card(a.cardInfo(i).id).px != nullptr;
+      printf("  Bilder: %d von %d\n", withImg, a.count());
+    }
+  }
   printf("Ton empfangen: Pegel (RMS) %.0f, Puffer %d Samples, %s\n", std::sqrt(sum / std::max(1L, cnt)), gRadio.ring.fill(), gRadio.playing() ? "spielt" : "gestoppt");
   return 0;
 }
@@ -480,6 +544,30 @@ int main(int argc, char** argv) {
   std::thread([] { for (;;) { portalPoll(gRadio, portalHost.c_str(), 8770); std::this_thread::sleep_for(std::chrono::seconds(2)); } }).detach();
   std::thread([] { portalStreamLoop(gRadio, [] { return portalHost.c_str(); }, 8770); }).detach();
   PortalSync sync;
+  static PortalImages portalImages;
+  portalImages.host = portalHost;
+  static std::mutex albumMu;
+  static std::string albumText, albumKey;   // vom Netz-Thread geholt, im Hauptthread geladen
+  static bool albumNew = false;
+  std::thread([] {
+    std::string have;
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+      if (!gRadio.albumTheme[0]) continue;
+      char key[48];
+      snprintf(key, sizeof key, "%s %08x", gRadio.albumTheme, unsigned(gRadio.albumVersion));
+      if (have == key) continue;
+      std::vector<uint8_t> raw;
+      const bool builtin = !std::strcmp(gRadio.albumTheme, "pferde");
+      if (!builtin && !portalDownload(portalHost.c_str(), 8770, "/album/karten.txt", PortalImages::sink, &raw)) continue;
+      raw.push_back(0);
+      std::lock_guard<std::mutex> g(albumMu);
+      albumText = builtin ? std::string(ALBUM_BUILTIN) : std::string(reinterpret_cast<char*>(raw.data()));
+      albumKey = key;
+      albumNew = true;
+      have = key;
+    }
+  }).detach();
 
   FakeImu imu;
   bool running = true, mouseDown = false;
@@ -534,6 +622,18 @@ int main(int argc, char** argv) {
     struct tm lt;
     localtime_r(&tt, &lt);
     in.epoch = int64_t(tt) + lt.tm_gmtoff;   // Ortszeit, wie sie später der Companion schickt
+    {
+      std::lock_guard<std::mutex> g(albumMu);
+      if (albumNew) {   // neues Kartenthema vom Portal
+        albumNew = false;
+        const bool builtin = albumKey.rfind("pferde ", 0) == 0;
+        portalImages.reload();
+        kids.album.setImages(builtin ? static_cast<ImageStore*>(&kids.images) : &portalImages);
+        kids.riddle.setAlbum(&kids.album, builtin ? static_cast<ImageStore*>(&kids.images) : &portalImages);
+        kids.album.load(albumText.c_str());
+        printf("Album: %s, %d Karten\n", kids.album.title(), kids.album.count());
+      }
+    }
     app.tick(in);
     sync.frame(app, gRadio, app.currentTitle(), starsGet(store), now);
     app.draw(scene);

@@ -51,10 +51,7 @@ void Home::needPos(int i, float& x, float& y) {
   y = 30;
 }
 
-int Home::cardsWaiting() const {
-  const int tot = store_.get("alb_tot", 0), earned = starsGet(store_) / 3;
-  return (earned < tot ? earned : tot) - store_.get("alb_open", 0);
-}
+int Home::cardsWaiting() const { return album_ ? album_->pending() : 0; }
 
 bool Home::asleep() const {
   if (epoch_ <= 0 || pet_.stage == Pet::EGG) return false;
@@ -85,6 +82,8 @@ void Home::enter(uint32_t ms) {
 void Home::tick(const TileInput& in) {
   const float dt = in.dt;
   clock_ += dt;
+  nVis_ = 0;   // abgeschaltete Apps verschwinden vom Dashboard
+  for (int i = 0; i < nApps_ && nVis_ < 8; i++) if (!(in.disabled >> apps_[i].tile & 1)) vis_[nVis_++] = i;
   lastSeen_ = in.ms;
   epoch_ = in.epoch;
   bubbleT_ = std::fmax(0, bubbleT_ - dt);
@@ -142,10 +141,10 @@ void Home::tick(const TileInput& in) {
     if (pet_.stage == Pet::EGG) {
       // Apps sind auch vor dem Schlüpfen erreichbar
       if (in.tap)
-        for (int i = 0; i < nApps_; i++) {
+        for (int i = 0; i < nVis_; i++) {
           float x, y;
-          iconPos(i, nApps_, x, y);
-          if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { pet_.warmth -= 0.08f; requestGoto(apps_[i].tile); break; }
+          iconPos(i, nVis_, x, y);
+          if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { pet_.warmth -= 0.08f; requestGoto(apps_[vis_[i]].tile); break; }
         }
       return;
     }
@@ -161,7 +160,7 @@ void Home::tick(const TileInput& in) {
       if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (NEED_R + 10) * (NEED_R + 10)) {
         if (i == Pet::FOOD) feed();
         else if (i == Pet::CUDDLE) say("Streichel mich!", 2);
-        else for (int k = 0; k < nApps_; k++) if (apps_[k].kind == 3) requestGoto(apps_[k].tile);
+        else for (int k = 0; k < nVis_; k++) if (apps_[vis_[k]].kind == 3) requestGoto(apps_[vis_[k]].tile);
         return;
       }
     }
@@ -178,10 +177,10 @@ void Home::tick(const TileInput& in) {
       say(rnd() < 0.5f ? "Hihi!" : "Das kitzelt!", 1.6f);
       for (int k = 0; k < 3; k++) { Synth::Voice v; v.wave = Synth::TRI; v.f0 = v.f1 = 520.f + 130 * k; v.delay = 0.08f * k; v.dur = 0.1f; v.vol = 0.12f; synth_.play(v); }
     } else {
-      for (int i = 0; i < nApps_; i++) {
+      for (int i = 0; i < nVis_; i++) {
         float x, y;
-        iconPos(i, nApps_, x, y);
-        if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { requestGoto(apps_[i].tile); break; }
+        iconPos(i, nVis_, x, y);
+        if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { requestGoto(apps_[vis_[i]].tile); break; }
       }
     }
   }
@@ -441,9 +440,14 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       s.capsule(x + 6 * K, y + 3 * K, x + 11 * K, y + 3 * K, 1.6f * K, hex(0xfff0c8));
       s.capsule(x + 6 * K, y + 8 * K, x + 11 * K, y + 8 * K, 1.6f * K, hex(0xfff0c8));
       break;
-    default: {   // Pferd
+    default: {   // Sammelalbum: Pferd oder Kartenstapel mit Stern
       static const Horse H = {"", 150, Coat::CHESTNUT, 0xc07a3a, 0xf0dca0, false};
-      drawHorse(s, H, x - 2 * K, y + 20 * K, 0.36f * K, clock_ * 0.3f);
+      if (!album_ || album_->horses()) drawHorse(s, H, x - 2 * K, y + 20 * K, 0.36f * K, clock_ * 0.3f);
+      else {
+        s.rrect(x - 13 * K, y - 15 * K, 24 * K, 32 * K, 4 * K, hex(0x3a2a80));
+        s.rrect(x - 9 * K, y - 17 * K, 24 * K, 32 * K, 4 * K, hex(0x6a4cff));
+        s.star(x + 3 * K, y - 1 * K, 8 * K, GOLD);
+      }
       if (cardsWaiting() > 0) {   // neue Karte wartet
         const float p = 0.8f + 0.2f * std::sin(clock_ * 4);
         s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 11 * p, GOLD);
@@ -452,7 +456,7 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       break;
     }
   }
-  s.text(fonts::small, a.label, x, y + ICON_R + 4, TXT_DIM, 1, Align::Center);
+  s.text(fonts::small, a.kind == 4 && album_ ? album_->shortName() : a.label, x, y + ICON_R + 4, TXT_DIM, 1, Align::Center);
 }
 
 void Home::draw(Scene& s) {
@@ -471,10 +475,10 @@ void Home::draw(Scene& s) {
     s.circle(W / 2 + 14, BUBBLE_Y + BUBBLE_H + 5, 5, bg, a);
     s.text(fonts::body, bubble_, W / 2, BUBBLE_Y + (BUBBLE_H - fonts::body.lineH) / 2 + 1, hex(0x2a1a30), a, Align::Center);
   }
-  for (int i = 0; i < nApps_; i++) {
+  for (int i = 0; i < nVis_; i++) {
     float x, y;
-    iconPos(i, nApps_, x, y);
-    drawIcon(s, apps_[i], x, y);
+    iconPos(i, nVis_, x, y);
+    drawIcon(s, apps_[vis_[i]], x, y);
   }
 }
 

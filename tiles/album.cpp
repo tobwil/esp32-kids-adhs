@@ -27,32 +27,76 @@ Album::Album(Synth& synth, Store& store, uint32_t seed) : synth_(synth), store_(
 bool Album::load(const char* text) {
   cards_.clear();
   text_.assign(text, text + std::strlen(text) + 1);
+  // Kopfzeilen: Voreinstellungen sind die Pferde
+  snprintf(id_, sizeof id_, "pferde");
+  title_[0] = short_[0] = count_[0] = question_[0] = 0;
+  bool v2 = false;
+  static char empty[1] = "";
   char* p = text_.data();
   while (*p) {
     char* e = std::strchr(p, '\n');
     if (e) *e = 0;
-    if (*p && *p != '#') {
-      const char* f[9] = {};
+    if (*p == '#') {
+      char* val = std::strchr(p, ' ');
+      if (val) {
+        *val++ = 0;
+        if (!std::strcmp(p, "#album")) snprintf(id_, sizeof id_, "%s", val);
+        else if (!std::strcmp(p, "#titel")) snprintf(title_, sizeof title_, "%s", val);
+        else if (!std::strcmp(p, "#symbol")) snprintf(short_, sizeof short_, "%s", val);
+        else if (!std::strcmp(p, "#zaehlwort")) snprintf(count_, sizeof count_, "%s", val);
+        else if (!std::strcmp(p, "#frage")) snprintf(question_, sizeof question_, "%s", val);
+        else if (!std::strcmp(p, "#format")) v2 = std::atoi(val) >= 2;
+      }
+    } else if (*p && int(cards_.size()) < MAX_CARDS) {
+      char* f[11] = {};
       int n = 0;
       f[n++] = p;
-      for (char* q = p; *q && n < 9; q++)
+      for (char* q = p; *q && n < 11; q++)
         if (*q == '|') { *q = 0; f[n++] = q + 1; }
-      if (n >= 8) cards_.push_back({std::atoi(f[0]), f[1], f[2], f[3], f[4], f[5], f[6], f[7], n > 8 ? f[8] : ""});
+      for (int k = n; k < 11; k++) f[k] = empty;
+      if (v2 && n >= 2) cards_.push_back({std::atoi(f[0]), f[1], f[2], f[3], empty, f[4], f[5], f[6], f[7], f[8], f[9], f[10]});
+      else if (!v2 && n >= 8) {   // Pferdeformat
+        static char gr[] = "Größe", fa[] = "Farben", we[] = "Wesen";
+        cards_.push_back({std::atoi(f[0]), f[1], f[2], f[3], gr, f[4], fa, f[5], we, f[6], f[7], f[8]});
+      }
     }
     if (!e) break;
     p = e + 1;
   }
+  horses_ = !std::strcmp(id_, "pferde");
+  if (!title_[0]) snprintf(title_, sizeof title_, horses_ ? "Pferde-Album" : "Sammelalbum");
+  if (!short_[0]) snprintf(short_, sizeof short_, horses_ ? "Pferde" : "Album");
+  if (!count_[0]) snprintf(count_, sizeof count_, horses_ ? "Pferden" : "Karten");
+  if (!question_[0]) snprintf(question_, sizeof question_, horses_ ? "Welches Pferd ist das?" : "Wer ist das?");
+  // Sammelstand je Thema; die Pferde behalten ihre alten Schlüssel
+  if (horses_) {
+    snprintf(kOpen_, sizeof kOpen_, "alb_open"); snprintf(kSeed_, sizeof kSeed_, "alb_seed"); kBase_[0] = 0;
+  } else {
+    uint32_t h = 2166136261u;
+    for (const char* c = id_; *c; c++) h = (h ^ uint8_t(*c)) * 16777619u;
+    snprintf(kOpen_, sizeof kOpen_, "ao%06lx", (unsigned long)(h & 0xFFFFFF));
+    snprintf(kSeed_, sizeof kSeed_, "as%06lx", (unsigned long)(h & 0xFFFFFF));
+    snprintf(kBase_, sizeof kBase_, "ab%06lx", (unsigned long)(h & 0xFFFFFF));
+  }
+  // neues Thema beginnt bei null: Sterne, die es vorher schon gab, zählen nicht
+  base_ = 0;
+  if (kBase_[0]) {
+    base_ = store_.get(kBase_, -1);
+    if (base_ < 0) { base_ = starsGet(store_); store_.set(kBase_, base_); }
+  }
   store_.set("alb_tot", count());
   shuffle();
-  opened_ = store_.get("alb_open", 0);
+  opened_ = store_.get(kOpen_, 0);
   if (opened_ > count()) opened_ = count();
+  page_ = 0;
+  phase_ = GRID;
   return !cards_.empty();
 }
 
 // Freischalt-Reihenfolge: einmal gemischt, Startwert im NVS, damit nach Neustart nichts doppelt kommt
 void Album::shuffle() {
-  uint32_t x = uint32_t(store_.get("alb_seed", 0));
-  if (!x) { x = (seed_ & 0x7FFFFFFF) | 1; store_.set("alb_seed", int(x)); }
+  uint32_t x = uint32_t(store_.get(kSeed_, 0));
+  if (!x) { x = (seed_ & 0x7FFFFFFF) | 1; store_.set(kSeed_, int(x)); }
   const int n = count();
   order_.resize(n);
   for (int i = 0; i < n; i++) order_[i] = i;
@@ -63,8 +107,14 @@ void Album::shuffle() {
   }
 }
 
+bool Album::isOwned(int i) const {
+  for (int k = 0; k < opened_; k++) if (order_[k] == i) return true;
+  return false;
+}
+
 int Album::pending() const {
-  const int earned = starsGet(store_) / STARS_PER_CARD;
+  const int st = starsGet(store_) - base_;
+  const int earned = st > 0 ? st / STARS_PER_CARD : 0;
   const int e = earned < count() ? earned : count();
   return e > opened_ ? e - opened_ : 0;
 }
@@ -85,7 +135,6 @@ void Album::tick(const TileInput& in) {
   t_ += in.dt;
   clock_ += in.dt;
   hintT_ = std::fmax(0, hintT_ - in.dt);
-  auto owned = [&](int i) { for (int k = 0; k < opened_; k++) if (order_[k] == i) return true; return false; };
   switch (phase_) {
     case GRID: {
       if (pending() > 0 && t_ > 0.3f) { phase_ = WRAPPED; t_ = 0; break; }
@@ -102,7 +151,7 @@ void Album::tick(const TileInput& in) {
         float x, y, w, h;
         cellRect(k, x, y, w, h);
         if (in.tapX >= x && in.tapX < x + w && in.tapY >= y && in.tapY < y + h) {
-          if (owned(i)) { card_ = i; phase_ = FRONT; t_ = 0; }
+          if (isOwned(i)) { card_ = i; phase_ = FRONT; t_ = 0; }
           else hintT_ = 3;
         }
       }
@@ -117,9 +166,10 @@ void Album::tick(const TileInput& in) {
     case WRAPPED:
       if (in.tap && t_ > 0.6f) {
         // nächste Karte aus der gemischten Reihenfolge aufdecken
+        if (opened_ >= count()) { phase_ = GRID; break; }
         card_ = order_[opened_];
         opened_++;
-        store_.set("alb_open", opened_);
+        store_.set(kOpen_, opened_);
         phase_ = REVEAL; t_ = 0;
         for (int k = 0; k < 4; k++) { Synth::Voice v; v.wave = Synth::SINE; v.f0 = v.f1 = 523.f * std::pow(1.26f, float(k)); v.delay = 0.09f * k; v.dur = 0.35f; v.vol = 0.12f; synth_.play(v); }
       }
@@ -141,26 +191,25 @@ static void wrapped(Scene& s, const char* text, const fonts::Font& f, float y, f
 
 void Album::drawGrid(Scene& s) {
   char buf[48];
-  s.text(fonts::title, "Pferde-Album", W / 2, 20, TXT, 1, Align::Center);
-  snprintf(buf, sizeof buf, "%d von %d Pferden", opened_, count());
+  s.text(Scene::textW(fonts::title, title_) <= 300 ? fonts::title : fonts::body, title_, W / 2, 20, TXT, 1, Align::Center);
+  snprintf(buf, sizeof buf, "%d von %d %s", opened_, count(), count_);
   s.text(fonts::small, buf, W / 2, 56, TXT_DIM, 1, Align::Center);
-  auto owned = [&](int i) { for (int k = 0; k < opened_; k++) if (order_[k] == i) return true; return false; };
   const float pa = smooth(t_ / 0.25f);
   for (int k = 0; k < PER_PAGE; k++) {
     const int i = page_ * PER_PAGE + k;
     if (i >= count()) break;
     float x, y, w, h;
     cellRect(k, x, y, w, h);
-    const bool have = owned(i);
+    const bool have = isOwned(i);
     s.rrect(x, y, w, h, 14, have ? CELL : CELL_LOCKED, pa);
     if (have) {
       const Image im = img_ ? img_->thumb(cards_[i].id) : Image{};
       if (im.px) s.image(im, x, y, 14, pa);
-      else drawHorse(s, PLACEHOLDER, x + w / 2 - 6, y + 88, 0.62f, clock_ * 0.3f + k, pa);
+      else drawPlaceholder(s, x + w / 2, y + 50, 0.62f, false, pa);
       const fonts::Font& f = Scene::textW(fonts::body, cards_[i].name) <= w - 10 ? fonts::body : fonts::small;
       s.text(f, cards_[i].name, x + w / 2, y + THUMB_H + 2 + (&f == &fonts::body ? 0 : 3), TXT, pa, Align::Center);
     } else {
-      drawHorse(s, SHADOW, x + w / 2 - 6, y + 88, 0.62f, 0, pa);
+      drawPlaceholder(s, x + w / 2, y + 50, 0.62f, true, pa);
       s.text(fonts::title, "?", x + w / 2, y + 26, hex(0x4a5a8a), pa, Align::Center);
       snprintf(buf, sizeof buf, "%d", cards_[i].id);
       s.text(fonts::small, buf, x + w / 2, y + THUMB_H + 5, hex(0x4a5a8a), pa, Align::Center);
@@ -185,43 +234,61 @@ void Album::drawGrid(Scene& s) {
   }
 }
 
+// Ohne Foto: gezeichnetes Pferd (eingebaute Pferde) oder ein Stern; gesperrt: Schatten
+void Album::drawPlaceholder(Scene& s, float x, float y, float scale, bool locked, float a) {
+  if (horses_) {
+    drawHorse(s, locked ? SHADOW : PLACEHOLDER, x - 6 * scale / 0.62f, y + 38 * scale / 0.62f, scale, locked ? 0 : clock_ * 0.3f, a);
+    return;
+  }
+  const float r = 40 * scale / 0.62f;
+  s.star(x, y + 4, r * 0.62f, locked ? hex(0x26304c) : GOLD, a, locked ? 0 : 0.2f * std::sin(clock_));
+}
+
 void Album::drawFront(Scene& s, int i, float a) {
-  const HorseCard& c = cards_[i];
+  const Card& c = cards_[i];
   s.rrect(18, 18, W - 36, H - 36, 44, CARD_RIM, a);
   s.rrect(20, 20, W - 40, H - 40, 42, CARD_BG, a);
   const Image im = img_ ? img_->card(c.id) : Image{};
   if (im.px) s.image(im, 20, 20, 42, a);
-  else drawHorse(s, PLACEHOLDER, W / 2 - 8, 196, 1.2f, clock_ * 0.3f, a);
+  else drawPlaceholder(s, W / 2, 122, 1.2f, false, a);
   const fonts::Font& nf = Scene::textW(fonts::title, c.name) <= 310 ? fonts::title : fonts::body;
   s.text(nf, c.name, W / 2, 226, TXT, a, Align::Center);
-  char buf[96];
-  s.text(fonts::body, c.typ, W / 2, 266, GOLD, a, Align::Center);
-  wrapped(s, c.herkunft, fonts::body, 296, 28, 2, TXT_DIM, a);
-  snprintf(buf, sizeof buf, "Größe: %s", c.groesse);
-  s.text(fonts::body, buf, W / 2, 344, TXT, a, Align::Center);
+  if (*c.sub) s.text(fonts::body, c.sub, W / 2, 266, GOLD, a, Align::Center);
+  if (*c.line1) wrapped(s, c.line1, fonts::body, 296, 28, 2, TXT_DIM, a);
+  if (*c.line2) {
+    char buf[96];
+    if (*c.label2) snprintf(buf, sizeof buf, "%s: %s", c.label2, c.line2);
+    else snprintf(buf, sizeof buf, "%s", c.line2);
+    wrapped(s, buf, fonts::body, 344, 28, 1, TXT, a, 316);
+  }
   const float ha = (0.5f + 0.25f * std::sin(clock_ * 2.5f)) * smooth((t_ - 1.5f) / 0.5f);
   s.text(fonts::small, "Tippen zum Umdrehen", W / 2, 392, TXT_DIM, ha * a, Align::Center);
 }
 
 void Album::drawBack(Scene& s, int i, float a) {
-  const HorseCard& c = cards_[i];
+  const Card& c = cards_[i];
   s.rrect(18, 18, W - 36, H - 36, 44, CARD_RIM, a);
   s.rrect(20, 20, W - 40, H - 40, 42, CARD_BG, a);
   // langer Name: kleinere Schrift, damit er auf die Karte passt
   if (Scene::textW(fonts::title, c.name) <= 226) s.text(fonts::title, c.name, W / 2, 34, TXT, a, Align::Center);
   else s.text(fonts::body, c.name, W / 2, 40, TXT, a, Align::Center);
-  s.text(fonts::body, "Farben", W / 2, 84, GOLD, a, Align::Center);
-  wrapped(s, c.farben, fonts::small, 112, 22, 2, TXT, a, 300);
-  s.text(fonts::body, "Wesen", W / 2, 164, GOLD, a, Align::Center);
-  wrapped(s, c.wesen, fonts::small, 192, 22, 2, TXT, a, 300);
-  s.star(W / 2 - Scene::textW(fonts::body, "Wusstest du?") / 2 - 16, 258, 9, GOLD, a);
-  s.text(fonts::body, "Wusstest du?", W / 2 + 6, 244, GOLD, a, Align::Center);
-  {   // „Wusstest du?“: groß, wenn es in drei Zeilen passt, sonst kleiner
-    char l[4][160];
-    if (wrapText(fonts::body, c.besonders, 296, l, 3) > 0) wrapped(s, c.besonders, fonts::body, 274, 28, 3, TXT, a, 296);
-    else wrapped(s, c.besonders, fonts::small, 276, 23, 4, TXT, a, 300);
+  if (*c.head3 || *c.text3) {
+    s.text(fonts::body, c.head3, W / 2, 84, GOLD, a, Align::Center);
+    wrapped(s, c.text3, fonts::small, 112, 22, 2, TXT, a, 300);
   }
-  if (c.foto && *c.foto) wrapped(s, c.foto, fonts::small, 372, 20, 2, hex(0x6a6a8a), a, 270);
+  if (*c.head4 || *c.text4) {
+    s.text(fonts::body, c.head4, W / 2, 164, GOLD, a, Align::Center);
+    wrapped(s, c.text4, fonts::small, 192, 22, 2, TXT, a, 300);
+  }
+  if (*c.fact) {
+    s.star(W / 2 - Scene::textW(fonts::body, "Wusstest du?") / 2 - 16, 258, 9, GOLD, a);
+    s.text(fonts::body, "Wusstest du?", W / 2 + 6, 244, GOLD, a, Align::Center);
+    // groß, wenn es in drei Zeilen passt, sonst kleiner
+    char l[4][160];
+    if (wrapText(fonts::body, c.fact, 296, l, 3) > 0) wrapped(s, c.fact, fonts::body, 274, 28, 3, TXT, a, 296);
+    else wrapped(s, c.fact, fonts::small, 276, 23, 4, TXT, a, 300);
+  }
+  if (*c.credit) wrapped(s, c.credit, fonts::small, 372, 20, 2, hex(0x6a6a8a), a, 270);
 }
 
 void Album::drawWrapped(Scene& s, float a) {

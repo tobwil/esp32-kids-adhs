@@ -10,6 +10,7 @@ namespace dk {
 
 struct PortalSync {
   int mode = -2, from = -1, to = -1;   // zuletzt vom Portal übernommen
+  long apps = -2;
   uint32_t nextState = 0;
 
   void frame(App& app, RadioPlayer& radio, const char* tile, int stars, uint32_t ms) {
@@ -23,11 +24,19 @@ struct PortalSync {
       mode = radio.lockMode; from = radio.lockFrom; to = radio.lockTo;
       app.setLock(mode, from, to);
     }
+    if (app.takeAppsChange()) {
+      snprintf(b, sizeof b, "/api/apps?aus=%lu", (unsigned long)app.disabled());
+      radio.queueAction(b);
+    }
+    if (radio.appsOff >= 0 && radio.appsOff != apps) {
+      apps = radio.appsOff;
+      app.setDisabled(uint32_t(apps));
+    }
     if (ms >= nextState) {
       nextState = ms + 1000;
       char t[48];
       encode(tile, t, sizeof t);
-      snprintf(b, sizeof b, "kachel=%s&sterne=%d", t, stars);
+      snprintf(b, sizeof b, "kachel=%s&sterne=%d&aus=%lu", t, stars, (unsigned long)app.disabled());
       radio.setDeviceState(b);
     }
   }

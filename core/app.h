@@ -56,6 +56,11 @@ class App {
   bool takeLockChange() { const bool d = lockDirty_; lockDirty_ = false; return d; }   // am Gerät geändert: ans Portal melden
   void lockWindow(int& from, int& to) const { from = lockFrom_; to = lockTo_; }
 
+  // Apps an/aus (Eltern): Bit je Kachel-Index, abgeschaltete sind weder sichtbar noch erreichbar. Gespeichert als „app_aus“.
+  void setDisabled(uint32_t mask);
+  uint32_t disabled() const { return disabled_; }
+  bool takeAppsChange() { const bool d = appsDirty_; appsDirty_ = false; return d; }
+
  private:
   void setCurrent(int i);
   void go(int target);        // mit Überblendung wechseln (Index, GOTO_BACK, GOTO_HOME)
@@ -64,7 +69,7 @@ class App {
   void settingsTap(float x, float y);
   void drawSettings(Scene& s);
   // Einträge der Einstellungen: Überschrift, Kachel-Einstellung, Ton, Helligkeit, Sperre, Gerätemenü, Fertig
-  enum RowKind : uint8_t { R_HEAD, R_TILE, R_SOUND, R_BRIGHT, R_LOCK, R_SYS, R_DONE };
+  enum RowKind : uint8_t { R_HEAD, R_TILE, R_SOUND, R_BRIGHT, R_LOCK, R_APP, R_SYS, R_DONE };
   struct Row { RowKind kind; int idx; };
   int settingsRows(Row* out, int cap) const;
   void rowText(const Row& r, char* buf, int n) const;
@@ -110,6 +115,9 @@ class App {
   // Sperre: nur eine Kachel (Radio) erreichbar, manuell oder nach Zeitplan (Minuten seit Mitternacht, Ortszeit)
   int lockTile_ = -1, lockMode_ = 0, lockFrom_ = 19 * 60 + 30, lockTo_ = 7 * 60;
   bool locked_ = false, lockDirty_ = false;
+  uint32_t disabled_ = 0;
+  bool appsDirty_ = false;
+  bool enabled(int i) const { return i == home_ || !(disabled_ >> i & 1); }
   void updateLock(int64_t epoch);
   float orbX_ = 0, orbY_ = 0;
   char dbg_[160];

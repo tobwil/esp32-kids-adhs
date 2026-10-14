@@ -149,6 +149,12 @@ void RadioPlayer::parse(const char* text) {
     else if (!std::strcmp(line, "laut")) maxVol_ = std::atoi(rest);
     else if (!std::strcmp(line, "schlaf")) sleepMin = std::atoi(rest);
     else if (!std::strcmp(line, "hinweis")) snprintf(hint_, sizeof hint_, "%s", rest);
+    else if (!std::strcmp(line, "apps")) appsOff = std::atol(rest);
+    else if (!std::strcmp(line, "album")) {
+      char t[24] = "";
+      unsigned long v = 0;
+      if (std::sscanf(rest, "%23s %lx", t, &v) >= 1) { snprintf(albumTheme, sizeof albumTheme, "%s", t); albumVersion = uint32_t(v); }
+    }
     else if (!std::strcmp(line, "quelle") && n < MAX_SOURCES) {
       // quelle <id> <art> <name …>
       char* art = std::strchr(rest, ' ');

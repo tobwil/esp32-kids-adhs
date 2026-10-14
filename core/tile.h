@@ -24,6 +24,7 @@ struct TileInput {
   float tiltX = 0, tiltY = 0, tiltZ = 1;   // Neigung (g, Bildschirmachsen: x rechts, y oben, z aus dem Bildschirm)
   float voice = 0;                // Lautstärke am Mikrofon 0..1 (nur der Pegel, nichts wird aufgenommen)
   bool locked = false;            // Sperre aktiv (z. B. Schlafenszeit: nur Radio)
+  uint32_t disabled = 0;          // von den Eltern abgeschaltete Kacheln (Bit je Index)
   float threshold = 0;
 };
 

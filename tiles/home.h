@@ -3,6 +3,7 @@
 // Er reagiert aufs Streicheln, Antippen, Schütteln und auf Stimme (nur der Pegel) und fragt ab und zu
 // „Wie geht's dir?“ (Antippen der Blase öffnet den Check-in). Darunter liegen die App-Symbole.
 #pragma once
+#include "album.h"
 #include "input.h"
 #include "pet.h"
 #include "synth.h"
@@ -14,8 +15,9 @@ class Home : public Tile {
  public:
   struct AppIcon { const char* label; int tile; int kind; };   // kind: 0 Gefühle, 1 Grummel, 2 Atmen, 3 Kugel, 4 Pferde, 5 Rätsel, 6 Radio
   Home(Synth& synth, Store& store);
-  void setApps(const AppIcon* apps, int n) { apps_ = apps; nApps_ = n; }
+  void setApps(const AppIcon* apps, int n) { apps_ = apps; nApps_ = n; nVis_ = n < 8 ? n : 8; for (int i = 0; i < nVis_; i++) vis_[i] = i; }
   void setCheckIn(int tile) { checkin_ = tile; }
+  void setAlbum(const Album* a) { album_ = a; }   // Name, Symbol und „neue Karte“-Abzeichen des Sammelalbums
   const char* title() const override { return "Start"; }
   void enter(uint32_t ms) override;
   void leave() override { pet_.save(store_); }
@@ -45,7 +47,9 @@ class Home : public Tile {
   Synth& synth_;
   Store& store_;
   const AppIcon* apps_ = nullptr;
+  const Album* album_ = nullptr;
   int nApps_ = 0, checkin_ = -1;
+  int vis_[8] = {}, nVis_ = 0;   // sichtbare Apps (nicht abgeschaltet)
   uint32_t seed_ = 0x9e3779b9;
   float clock_ = 0, askT_ = 4, saveT_ = 30;
   uint32_t lastSeen_ = 0;   // ms, zuletzt auf dem Dashboard (Begrüßung nur nach längerer Pause)

@@ -81,7 +81,10 @@ void CheckIn::tick(const TileInput& in) {
     if (chosen_ == FROH) {
       if (go && t_ > HAPPY_BACK - (in.tap ? 3 : 0)) { chosen_ = -1; again_ = false; t_ = 0; requestGoto(GOTO_BACK); }
     } else if (go) {
-      requestGoto(chosen_ == WUT ? grummelTile_ : breatheTile_);
+      // abgeschaltete Übung: die andere nehmen, sind beide aus, zurück
+      int to = chosen_ == WUT ? grummelTile_ : breatheTile_;
+      if (to >= 0 && (in.disabled >> to & 1)) to = to == grummelTile_ ? breatheTile_ : grummelTile_;
+      requestGoto(to >= 0 && !(in.disabled >> to & 1) ? to : int(GOTO_BACK));
       chosen_ = -1;
       again_ = false;
       t_ = 0;

@@ -27,11 +27,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "daten")
 REC = os.path.join(DATA, "aufnahmen")
+ALBEN = os.path.join(DATA, "alben")
 CONFIG = os.path.join(DATA, "einstellungen.json")
 TOKENS = os.path.join(DATA, "spotify.json")
 RATE = 16000                      # wie Synth::RATE auf dem Gerät
@@ -39,6 +41,12 @@ DEVICE_NAME = "Grummel-Radio"     # so heißt der Lautsprecher in der Spotify-Ap
 SCOPES = "user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative"
 
 os.makedirs(REC, exist_ok=True)
+os.makedirs(ALBEN, exist_ok=True)
+sys.path.insert(0, os.path.dirname(HERE))   # tools/: Bildfunktionen aus horses.py
+
+# Kacheln auf dem Gerät (Index wie in firmware/main.cpp), für „Apps an/aus“
+APPS = [(1, "Wie geht's dir?"), (2, "Grummel"), (3, "Atmen"), (4, "Kugel ins Loch"), (5, "Sammelalbum"), (6, "Rätsel"), (7, "Radio")]
+MAX_CARDS = 48
 lock = threading.RLock()
 
 try:
@@ -51,7 +59,7 @@ except ImportError:
 # ---------------- Einstellungen ----------------
 
 DEFAULT = {"sperre": {"modus": 0, "von": 19 * 60 + 30, "bis": 7 * 60}, "laut": 70, "schlaf": 30,
-           "zufall": True, "quellen": [], "spotify": {"client_id": ""}}
+           "zufall": True, "quellen": [], "spotify": {"client_id": ""}, "apps_aus": 0, "album": "pferde"}
 
 
 def load_config():
@@ -263,6 +271,9 @@ def device_reply():
                  f"laut {cfg['laut']}", f"schlaf {cfg['schlaf']}"]
         for s in cfg["quellen"]:
             lines.append(f"quelle {s['id']} {s['art']} {s['name']}")
+        lines.append(f"apps {int(cfg.get('apps_aus', 0))}")
+        aid = cfg.get("album", "pferde")
+        lines.append(f"album {aid} {album_version(aid):08x}" if aid != "pferde" else "album pferde 0")
         hint = spotify_hint
         if not hint and any(s["art"] == "spotify" for s in cfg["quellen"]) and not tokens().get("refresh_token"):
             hint = "Spotify ist nicht verbunden"
@@ -301,6 +312,98 @@ def new_id(prefix):
     while f"{prefix}{i}" in used or os.path.exists(os.path.join(REC, f"{prefix}{i}.pcm")):
         i += 1
     return f"{prefix}{i}"
+
+
+# ---------------- Sammelalben ----------------
+# daten/alben/<id>/thema.json (Titel, Karten) und <karte>.jpg (328×196, Baseline-JPEG fürs Gerät)
+
+def slug(s):
+    s = s.lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:20] or "album"
+
+
+def album_dir(aid):
+    return os.path.join(ALBEN, re.sub(r"[^a-z0-9-]", "", aid))
+
+
+def album_load(aid):
+    try:
+        with open(os.path.join(album_dir(aid), "thema.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def album_save(a):
+    d = album_dir(a["id"])
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "thema.json"), "w", encoding="utf-8") as f:
+        json.dump(a, f, ensure_ascii=False, indent=1)
+
+
+def album_list():
+    out = []
+    for name in sorted(os.listdir(ALBEN)):
+        a = album_load(name)
+        if a:
+            for k in a["karten"]:
+                k["bild"] = os.path.exists(os.path.join(album_dir(a["id"]), f"{k['id']}.jpg"))
+            out.append(a)
+    return out
+
+
+def field(s, n):
+    return re.sub(r"[\r\n|]+", " ", str(s or "")).strip()[:n]
+
+
+def album_text(a):
+    """Kartentext fürs Gerät (Format 2, siehe tiles/album.h)."""
+    lines = [f"#album {a['id']}", f"#titel {a['titel']}", f"#symbol {a['symbol']}", f"#zaehlwort {a['zaehlwort']}",
+             f"#frage {a['frage']}", "#format 2",
+             "#bilder " + ",".join(str(k["id"]) for k in a["karten"] if os.path.exists(os.path.join(album_dir(a["id"]), f"{k['id']}.jpg")))]
+    for k in a["karten"]:
+        lines.append("|".join([str(k["id"]), k["name"], k.get("untertitel", ""), k.get("zeile1", ""), k.get("zeile2", ""),
+                               a.get("ueberschrift3", ""), k.get("text3", ""), a.get("ueberschrift4", ""), k.get("text4", ""),
+                               k.get("wusstest", ""), k.get("foto", "")]))
+    return "\n".join(lines) + "\n"
+
+
+def album_version(aid):
+    a = album_load(aid)
+    if not a:
+        return 0
+    v = zlib.crc32(album_text(a).encode())
+    for k in a["karten"]:
+        p = os.path.join(album_dir(aid), f"{k['id']}.jpg")
+        if os.path.exists(p):
+            st = os.stat(p)
+            v = zlib.crc32(f"{k['id']}:{st.st_size}:{int(st.st_mtime)}".encode(), v)
+    return v or 1
+
+
+def card_image(raw):
+    """Foto → 328×196 ohne Abschneiden (Rand unscharf gefüllt), Baseline-JPEG."""
+    try:
+        from PIL import Image, ImageOps
+        from horses import fit_card
+    except ImportError:
+        raise RuntimeError("Pillow fehlt: tools/.venv/bin/pip install pillow")
+    import io
+    im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
+    card = fit_card(im)
+    buf = io.BytesIO()
+    card.save(buf, "JPEG", quality=84, progressive=False, optimize=True)
+    return buf.getvalue(), card
+
+
+def card_rgb(aid, kid, thumb):
+    """Rohdaten RGB565 für den Simulator (der kein JPEG dekodiert)."""
+    from PIL import Image
+    from horses import to_rgb565, THUMB_W, THUMB_H
+    im = Image.open(os.path.join(album_dir(aid), f"{kid}.jpg")).convert("RGB")
+    if thumb:
+        im = im.resize((THUMB_W, THUMB_H), Image.LANCZOS)
+    return to_rgb565(im)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -347,6 +450,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, device_reply())
             if u.path == "/api/radio":
                 return self.radio_action(q)
+            if u.path == "/api/apps":   # am Gerät umgestellt
+                with lock:
+                    cfg["apps_aus"] = int(q.get("aus", 0)) & 0xFE
+                    save_config()
+                return self.send(200, "ok\n")
+            if u.path == "/api/alben":
+                return self.json({"aktiv": cfg.get("album", "pferde"), "alben": album_list(), "max": MAX_CARDS})
+            if u.path == "/album/karten.txt":   # aktives Thema fürs Gerät
+                a = album_load(cfg.get("album", ""))
+                if not a:
+                    return self.send(404, "kein Thema\n")
+                return self.send(200, album_text(a))
+            m = re.fullmatch(r"/album/bild/(\d+)(_t)?\.(jpg|rgb)", u.path)
+            if m:
+                aid = cfg.get("album", "")
+                if m.group(3) == "jpg":
+                    with open(os.path.join(album_dir(aid), m.group(1) + ".jpg"), "rb") as f:
+                        return self.send(200, f.read(), "image/jpeg")
+                return self.send(200, card_rgb(aid, m.group(1), bool(m.group(2))), "application/octet-stream")
+            m = re.fullmatch(r"/alben/([a-z0-9-]+)/(\d+)\.jpg", u.path)
+            if m:
+                with open(os.path.join(album_dir(m.group(1)), m.group(2) + ".jpg"), "rb") as f:
+                    return self.send(200, f.read(), "image/jpeg", {"Cache-Control": "no-cache"})
             if u.path == "/api/sperre":   # am Gerät umgestellt
                 with lock:
                     cfg["sperre"]["modus"] = max(0, min(2, int(q.get("modus", 0))))
@@ -389,6 +515,17 @@ class Handler(BaseHTTPRequestHandler):
                                            "sekunden": round(len(pcm) / 2 / RATE)})
                     save_config()
                 return self.json({"ok": True, "id": sid})
+            if u.path == "/api/album/bild":
+                raw = self.body()
+                jpg, _ = card_image(raw)
+                with lock:
+                    a = album_load(q.get("album", ""))
+                    kid = int(q.get("karte", 0))
+                    if not a or not any(k["id"] == kid for k in a["karten"]):
+                        raise RuntimeError("Karte nicht gefunden")
+                    with open(os.path.join(album_dir(a["id"]), f"{kid}.jpg"), "wb") as f:
+                        f.write(jpg)
+                return self.json({"ok": True})
             data = json.loads(self.body() or b"{}")
             with lock:
                 if u.path == "/api/einstellungen":
@@ -400,6 +537,60 @@ class Handler(BaseHTTPRequestHandler):
                             cfg[k] = max(lo, min(hi, int(data[k])))
                     if "zufall" in data:
                         cfg["zufall"] = bool(data["zufall"])
+                    if "apps_aus" in data:
+                        cfg["apps_aus"] = int(data["apps_aus"]) & 0xFE
+                elif u.path == "/api/album/speichern":
+                    aid = data.get("id") or slug(data.get("symbol") or data.get("titel", ""))
+                    a = album_load(aid) if data.get("id") else None
+                    if not a:
+                        if aid == "pferde" or album_load(aid):
+                            aid = aid[:16] + "-" + secrets.token_hex(2)
+                        a = {"id": aid, "karten": []}
+                    a["titel"] = field(data.get("titel"), 28) or "Sammelalbum"
+                    a["symbol"] = field(data.get("symbol"), 12) or "Album"
+                    a["zaehlwort"] = field(data.get("zaehlwort"), 14) or "Karten"
+                    a["frage"] = field(data.get("frage"), 40) or "Wer ist das?"
+                    a["ueberschrift3"] = field(data.get("ueberschrift3"), 20)
+                    a["ueberschrift4"] = field(data.get("ueberschrift4"), 20)
+                    album_save(a)
+                    save_config()
+                    return self.json({"ok": True, "id": aid})
+                elif u.path == "/api/album/aktiv":
+                    aid = data.get("id", "pferde")
+                    if aid != "pferde" and not album_load(aid):
+                        raise RuntimeError("Thema nicht gefunden")
+                    cfg["album"] = aid
+                elif u.path == "/api/album/loeschen":
+                    d = album_dir(data["id"])
+                    if os.path.isdir(d) and data["id"] != "pferde":
+                        shutil.rmtree(d)
+                    if cfg.get("album") == data["id"]:
+                        cfg["album"] = "pferde"
+                elif u.path == "/api/album/karte":
+                    a = album_load(data.get("album", ""))
+                    if not a:
+                        raise RuntimeError("Thema nicht gefunden")
+                    kid = int(data.get("id") or 0)
+                    k = next((k for k in a["karten"] if k["id"] == kid), None)
+                    if not k:
+                        if len(a["karten"]) >= MAX_CARDS:
+                            raise RuntimeError(f"Höchstens {MAX_CARDS} Karten pro Thema")
+                        kid = max([k["id"] for k in a["karten"]] + [0]) + 1
+                        k = {"id": kid}
+                        a["karten"].append(k)
+                    k["name"] = field(data.get("name"), 30) or "Ohne Namen"
+                    for key, n in (("untertitel", 30), ("zeile1", 60), ("zeile2", 40), ("text3", 90), ("text4", 90), ("wusstest", 160), ("foto", 90)):
+                        k[key] = field(data.get(key), n)
+                    album_save(a)
+                    return self.json({"ok": True, "id": kid})
+                elif u.path == "/api/album/karte/loeschen":
+                    a = album_load(data.get("album", ""))
+                    if a:
+                        a["karten"] = [k for k in a["karten"] if k["id"] != int(data["id"])]
+                        album_save(a)
+                        p = os.path.join(album_dir(a["id"]), f"{int(data['id'])}.jpg")
+                        if os.path.exists(p):
+                            os.remove(p)
                 elif u.path == "/api/quelle/loeschen":
                     cfg["quellen"] = [s for s in cfg["quellen"] if s["id"] != data["id"]]
                     p = os.path.join(REC, re.sub(r"[^A-Za-z0-9_-]", "", data["id"]) + ".pcm")
@@ -492,6 +683,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"geraet": {"online": time.time() - seen < 8, "zuletzt": int(seen), "werte": device["params"]},
                     "sperre": cfg["sperre"], "laut": cfg["laut"], "schlaf": cfg["schlaf"], "zufall": cfg.get("zufall", True),
                     "quellen": cfg["quellen"],
+                    "apps": [{"index": i, "name": n, "an": not (int(cfg.get("apps_aus", 0)) >> i & 1)} for i, n in APPS],
                     "spotify": {"client_id": cfg["spotify"]["client_id"], "verbunden": bool(t.get("refresh_token")),
                                 "librespot": audio.status, "hinweis": spotify_hint},
                     "uhr": time.strftime("%H:%M")}

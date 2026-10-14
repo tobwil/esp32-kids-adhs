@@ -11,3 +11,6 @@
 void netBegin(dk::RadioPlayer* radio);
 dk::SystemMenu* netMenu();
 void netStatus(char* out, int n);   // für den seriellen Befehl „status“
+// Sammelalbum: true = ein Thema aus dem Portal liegt in /album (sonst die eingebauten Pferde)
+bool netAlbumTheme();
+bool netTakeAlbumReload();          // neues Thema geladen: einmal true

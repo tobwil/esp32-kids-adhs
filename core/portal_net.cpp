@@ -92,6 +92,23 @@ static bool fetch(const char* host, int port, const char* path, char* out, int c
   return true;
 }
 
+bool portalDownload(const char* host, int port, const char* path, bool (*sink)(void*, const uint8_t*, int), void* ctx) {
+  char first[1024];
+  int n = 0;
+  const int fd = httpGet(host, port, path, first, n);
+  if (fd < 0) return false;
+  bool ok = n == 0 || sink(ctx, reinterpret_cast<uint8_t*>(first), n);
+  uint8_t buf[1024];
+  while (ok) {
+    const int r = int(recv(fd, buf, sizeof buf, 0));
+    if (r == 0) break;
+    if (r < 0) { ok = false; break; }   // Zeitlimit oder Fehler: unvollständig
+    ok = sink(ctx, buf, r);
+  }
+  close(fd);
+  return ok;
+}
+
 bool portalPoll(RadioPlayer& p, const char* host, int port) {
   char path[256], body[4096];
   bool ok = true;

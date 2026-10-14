@@ -111,11 +111,12 @@ bool Riddle::pickHorse() {
   do ks[1] = int(rnd() * n) % n; while (ks[1] == ks[0]);
   do ks[2] = int(rnd() * n) % n; while (ks[2] == ks[0] || ks[2] == ks[1]);
   horse_ = album_->ownedCard(ks[0]);
-  const HorseCard& c = album_->cardInfo(horse_);
-  if (!img_->card(c.id).px) return false;   // ohne Foto kein Pferderätsel
+  const Card& c = album_->cardInfo(horse_);
+  if (!img_->card(c.id).px) return false;   // ohne Foto kein Bilderrätsel
   kind_ = HORSE;
-  snprintf(q_, sizeof q_, "Welches Pferd ist das?");
-  snprintf(expl_, sizeof expl_, "%s aus %s.", c.typ, c.herkunft);
+  snprintf(q_, sizeof q_, "%s", album_->question());
+  if (*c.sub && *c.line1) snprintf(expl_, sizeof expl_, "%s · %s", c.sub, c.line1);
+  else snprintf(expl_, sizeof expl_, "%s", *c.sub ? c.sub : c.line1);
   correct_ = int(rnd() * 3) % 3;
   for (int k = 0, d = 1; k < 3; k++) {
     const int ci = k == correct_ ? horse_ : album_->ownedCard(ks[d++]);

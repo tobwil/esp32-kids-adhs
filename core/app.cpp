@@ -31,6 +31,7 @@ void App::begin(uint32_t ms) {
   lockMode_ = store_.get("lk_mode", 0);
   lockFrom_ = store_.get("lk_from", lockFrom_);
   lockTo_ = store_.get("lk_to", lockTo_);
+  disabled_ = uint32_t(store_.get("app_aus", 0));
   applySound();
   cur_ = home_;
   tiles_[cur_]->enter(ms);
@@ -57,6 +58,14 @@ void App::setLock(int mode, int from, int to) {
   if (mode == lockMode_ && from == lockFrom_ && to == lockTo_) return;
   lockMode_ = mode; lockFrom_ = from; lockTo_ = to;
   store_.set("lk_mode", mode); store_.set("lk_from", from); store_.set("lk_to", to);
+}
+
+void App::setDisabled(uint32_t mask) {
+  mask &= ~(1u << home_);
+  if (mask == disabled_) return;
+  disabled_ = mask;
+  store_.set("app_aus", int(mask));
+  if (!locked_ && !enabled(cur_)) go(Tile::GOTO_HOME);   // offene App wurde abgeschaltet
 }
 
 void App::updateLock(int64_t epoch) {
@@ -86,7 +95,7 @@ void App::go(int target) {
   } else if (target >= 0 && target < int(tiles_.size()) && target != home_) {
     back_[target] = cur_;   // merken, wer die App geöffnet hat
   }
-  if (target < 0 || target >= int(tiles_.size()) || target == cur_) return;
+  if (target < 0 || target >= int(tiles_.size()) || target == cur_ || !enabled(target)) return;
   if (target == home_) for (int& b : back_) b = -1;
   transTo_ = target;
   transReturning_ = returning;
@@ -105,11 +114,12 @@ int App::swipeTarget(float d) const {
   const int n = int(tiles_.size());
   if (d < 0) {
     int t = cur_ + 1;
-    if (t == home_) t++;
+    while (t < n && (t == home_ || !enabled(t))) t++;   // abgeschaltete überspringen
     return t < n ? t : -1;
   }
   if (cur_ == home_) return -1;
-  const int t = cur_ - 1;
+  int t = cur_ - 1;
+  while (t >= 0 && t != home_ && !enabled(t)) t--;
   return t < 0 ? home_ : t;
 }
 
@@ -122,6 +132,8 @@ int App::settingsRows(Row* out, int cap) const {
   add(R_SOUND, 0);
   add(R_BRIGHT, 0);
   if (lockTile_ >= 0) add(R_LOCK, 0);
+  add(R_HEAD, 3);
+  for (int i = 0; i < int(tiles_.size()); i++) if (i != home_) add(R_APP, i);
   if (sys_ && sys_->count()) { add(R_HEAD, 2); for (int i = 0; i < sys_->count(); i++) add(R_SYS, i); }
   add(R_DONE, 0);
   return n;
@@ -135,7 +147,8 @@ float App::rowH(const Row& r) const {
 
 void App::rowText(const Row& r, char* buf, int n) const {
   switch (r.kind) {
-    case R_HEAD: snprintf(buf, n, "%s", r.idx == 0 ? tiles_[cur_]->title() : r.idx == 1 ? "Allgemein" : "Verbindung"); break;
+    case R_HEAD: snprintf(buf, n, "%s", r.idx == 0 ? tiles_[cur_]->title() : r.idx == 1 ? "Allgemein" : r.idx == 2 ? "Verbindung" : "Apps"); break;
+    case R_APP: snprintf(buf, n, "%.20s: %s", tiles_[r.idx]->title(), enabled(r.idx) ? "an" : "aus"); break;
     case R_TILE: tiles_[cur_]->settingText(r.idx, buf, n); break;
     case R_SOUND: snprintf(buf, n, "Ton: %s", SOUND_NAMES[sound_]); break;
     case R_BRIGHT: snprintf(buf, n, "Helligkeit: %s", BRIGHT_NAMES[brightLevel_]); break;
@@ -182,6 +195,7 @@ void App::settingsTap(float x, float y) {
         case R_LOCK: setLock((lockMode_ + 1) % 3, lockFrom_, lockTo_); lockDirty_ = true; break;   // aus → nur Radio → Zeitplan
         case R_TILE: if (tiles_[cur_]->settingTap(r.idx)) settings_ = false; break;
         case R_SYS: sys_->tap(r.idx); break;
+        case R_APP: setDisabled(disabled_ ^ (1u << r.idx)); appsDirty_ = true; break;
         case R_DONE: settings_ = false; break;
         default: break;
       }
@@ -203,6 +217,7 @@ void App::tick(const Input& in) {
   ti.voice = in.voice;
   updateLock(in.epoch);
   ti.locked = locked_;
+  ti.disabled = disabled_;
 
   // ---- Touch ----
   // beim Schütteln liegen Finger am Rand: kein Tippen oder langer Druck bis kurz danach

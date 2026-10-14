@@ -87,9 +87,10 @@ static Breathe* breathe;
 static Balance* balance;
 static Album* album;
 
-// ---------------- Pferdefotos: JPEG aus LittleFS (/pferde/<id>.jpg), dekodiert in PSRAM ----------------
+// ---------------- Kartenbilder: JPEG aus LittleFS (/pferde/<id>.jpg oder /album/<id>.jpg), dekodiert in PSRAM ----------------
 struct FlashImages : ImageStore {
   JPEGDEC jpeg;
+  char dir[12] = "/pferde";
   struct Slot { int id = -1; uint16_t* px = nullptr; };
   Slot thumbs[48];
   Slot full;
@@ -107,7 +108,7 @@ struct FlashImages : ImageStore {
   }
   bool decode(int id, int scale, int w, int h, uint16_t* out) {
     char path[32];
-    snprintf(path, sizeof path, "/pferde/%d.jpg", id);
+    snprintf(path, sizeof path, "%s/%d.jpg", dir, id);
     if (!fsOk || !LittleFS.exists(path)) return false;
     File f = LittleFS.open(path, "r");
     const size_t n = f.size();
@@ -159,9 +160,13 @@ static FlashImages images;
 static char* albumText = nullptr;
 
 static void loadAlbum() {
+  // aktives Thema: vom Portal geladen (/album, siehe net.cpp) oder die eingebauten Pferde (/pferde)
   char* text = nullptr;
-  if (fsOk && LittleFS.exists("/pferde/karten.txt")) {
-    File f = LittleFS.open("/pferde/karten.txt", "r");
+  const bool own = fsOk && netAlbumTheme() && LittleFS.exists("/album/karten.txt");
+  const char* file = own ? "/album/karten.txt" : "/pferde/karten.txt";
+  snprintf(images.dir, sizeof images.dir, own ? "/album" : "/pferde");
+  if (fsOk && LittleFS.exists(file)) {
+    File f = LittleFS.open(file, "r");
     const size_t n = f.size();
     text = static_cast<char*>(heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM));
     if (text) { f.readBytes(text, n); text[n] = 0; }
@@ -516,6 +521,7 @@ void setup() {
   riddle->setAlbum(album, &images);
   radioPlayer = new (heap_caps_malloc(sizeof(RadioPlayer), MALLOC_CAP_SPIRAM)) RadioPlayer();
   home->setApps(APPS, 7);
+  home->setAlbum(album);
   home->setCheckIn(T_CHECKIN);
   checkin->setTargets(T_GRUMMEL, T_BREATHE);
   loadPack();
@@ -590,6 +596,7 @@ void loop() {
   in.ms = millis();
   in.epoch = epochBase ? epochBase + in.ms / 1000 : 0;
 
+  if (netTakeAlbumReload()) loadAlbum();   // neues Kartenthema vom Portal
   app->tick(in);
   portalSync.frame(*app, *radioPlayer, app->currentTitle(), starsGet(store), in.ms);
   {   // Uhrzeit vom Portal (Ortszeit)
