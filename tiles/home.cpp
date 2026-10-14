@@ -12,11 +12,11 @@
 
 namespace dk {
 
-static const Col TXT = hex(0xf2eefa), TXT_DIM = hex(0x9a94b4), INK = hex(0x1c1228), EYE = hex(0xfbf8ff);
+static const Col TXT = hex(0xf2eefa), INK = hex(0x1c1228), EYE = hex(0xfbf8ff);
 static const Col BODY_TOP = hex(0x86e3c9), BODY_BOT = hex(0x3aa98f), CHEEK = hex(0xff9ec0);
 static const Col ICON_BG = hex(0x1d2540), ICON_RIM = hex(0x2e3a62), GOLD = hex(0xffd166);
 static const Col NEED_COL[Pet::N_NEEDS] = {hex(0xffa64d), hex(0xff8fb8), hex(0x5fd8c8)};
-static constexpr float ICON_R = 26, NEED_R = 15, ICON_K = ICON_R / 30;   // ICON_K: Symbole waren für Radius 30 gezeichnet
+static constexpr float NEED_R = 15;
 static constexpr float BUBBLE_Y = 58, BUBBLE_H = 40;
 
 static inline float clampf(float v, float a, float b) { return v < a ? a : v > b ? b : v; }
@@ -33,16 +33,46 @@ float Home::rnd() {
   return (seed_ & 0xFFFFFF) / float(0x1000000);
 }
 
-void Home::iconPos(int i, int n, float& x, float& y) {
-  // erste Reihe drei (bei acht Apps vier), zweite Reihe der Rest (bei vier etwas enger), jeweils mittig
-  const int first = n >= 8 ? 4 : 3;
-  const int row = i < first ? 0 : 1, inRow = row ? n - first : (n < first ? n : first), k = row ? i - first : i;
-  x = W / 2 + (k - (inRow - 1) * 0.5f) * (inRow > 3 ? 84 : 104);
-  y = row ? 386 : 292;
+static inline int wrapi(int i, int n) { return ((i % n) + n) % n; }
+
+bool Home::focusApp(int tile) {
+  for (int i = 0; i < nVis_; i++)
+    if (apps_[vis_[i]].tile == tile) { carIdx_ = i; carPos_ = float(i); carDrag_ = 0; return true; }
+  return false;
+}
+
+int Home::focusedTile() const { return nVis_ ? apps_[vis_[wrapi(carIdx_, nVis_)]].tile : -1; }
+
+void Home::carouselTick(const TileInput& in) {
+  if (!nVis_) return;
+  // Wischen im Karussell: das Bild folgt dem Finger, beim Loslassen rastet es auf die nächste App ein
+  if (in.finger && !carFinger_ && in.fingerY > CAR_TOP) { carDragging_ = true; carStartX_ = in.fingerX; }
+  if (carDragging_ && in.finger) carDrag_ = in.fingerX - carStartX_;
+  if (carDragging_ && !in.finger) {
+    const float p = carPos_ - carDrag_ / CAR_DX;   // sichtbare Stellung beim Loslassen
+    int target = int(std::floor(p + 0.5f));
+    if (std::fabs(carDrag_) > 40 && target == carIdx_) target += carDrag_ < 0 ? 1 : -1;   // kurzer Wisch reicht für eine App
+    carPos_ = p;
+    carDrag_ = 0;
+    carIdx_ = target;
+    carDragging_ = false;
+    store_.set("car_i", wrapi(carIdx_, nVis_));
+  }
+  carFinger_ = in.finger;
+  carPos_ = approach(carPos_, float(carIdx_), 10, in.dt);
+}
+
+bool Home::carouselTap(float x, float y) {
+  if (!nVis_ || y < CAR_TOP) return false;
+  if (std::fabs(x - W / 2) < 82) { requestGoto(focusedTile()); return true; }   // Mitte: öffnen
+  carIdx_ += x < W / 2 ? -1 : 1;   // Nachbar in die Mitte holen
+  store_.set("car_i", wrapi(carIdx_, nVis_));
+  return true;
 }
 
 bool Home::claimsDragAt(float x, float y) const {
-  // Streicheln beginnt auf Grummel (oder dem Ei): dort öffnet Wischen keine App
+  // Streicheln beginnt auf Grummel (oder dem Ei), im Karussell dreht Wischen die Apps: dort blättert Wischen nicht
+  if (y > CAR_TOP) return true;
   const float dx = x - BUDDY_X, dy = y - buddyY(), r = R_ * 1.5f;
   return dx * dx + dy * dy < r * r;
 }
@@ -86,6 +116,8 @@ void Home::tick(const TileInput& in) {
   clock_ += dt;
   nVis_ = 0;   // abgeschaltete Apps verschwinden vom Dashboard
   for (int i = 0; i < nApps_ && nVis_ < 8; i++) if (!(in.disabled >> apps_[i].tile & 1)) vis_[nVis_++] = i;
+  if (!started_) { started_ = true; carIdx_ = store_.get("car_i", 0); carPos_ = float(carIdx_); }
+  carouselTick(in);
   lastSeen_ = in.ms;
   epoch_ = in.epoch;
   bubbleT_ = std::fmax(0, bubbleT_ - dt);
@@ -154,18 +186,14 @@ void Home::tick(const TileInput& in) {
     sq_ = clampf(sq_ + sqv_ * dt, -0.14f, 0.14f);
     if (pet_.stage == Pet::EGG) {
       // Apps sind auch vor dem Schlüpfen erreichbar
-      if (in.tap)
-        for (int i = 0; i < nVis_; i++) {
-          float x, y;
-          iconPos(i, nVis_, x, y);
-          if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { pet_.warmth -= 0.08f; requestGoto(apps_[vis_[i]].tile); break; }
-        }
+      if (in.tap && carouselTap(in.tapX, in.tapY)) pet_.warmth -= 0.08f;
       return;
     }
   }
 
   // ---- Antippen ----
-  if (in.tap) {
+  if (in.tap && carouselTap(in.tapX, in.tapY)) askT_ = std::fmax(askT_, 10);
+  else if (in.tap) {
     askT_ = std::fmax(askT_, 10);
     const float bw = Scene::textW(fonts::body, bubble_) + 36;
     for (int i = 0; i < Pet::N_NEEDS; i++) {   // Bedürfnis-Symbole oben
@@ -190,12 +218,6 @@ void Home::tick(const TileInput& in) {
       sqv_ += 3;
       say(rnd() < 0.5f ? "Hihi!" : "Das kitzelt!", 1.6f);
       for (int k = 0; k < 3; k++) { Synth::Voice v; v.wave = Synth::TRI; v.f0 = v.f1 = 520.f + 130 * k; v.delay = 0.08f * k; v.dur = 0.1f; v.vol = 0.12f; synth_.play(v); }
-    } else {
-      for (int i = 0; i < nVis_; i++) {
-        float x, y;
-        iconPos(i, nVis_, x, y);
-        if ((in.tapX - x) * (in.tapX - x) + (in.tapY - y) * (in.tapY - y) < (ICON_R + 14) * (ICON_R + 14)) { requestGoto(apps_[vis_[i]].tile); break; }
-      }
     }
   }
 
@@ -414,9 +436,9 @@ void Home::drawNeeds(Scene& s) {
   }
 }
 
-void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
-  constexpr float K = ICON_K;
-  s.circle(x, y, ICON_R + 2, ICON_RIM);
+void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y, float ICON_R, bool label) {
+  const float K = ICON_R / 30;   // Symbole sind für Radius 30 gezeichnet
+  s.circle(x, y, ICON_R + 3, ICON_RIM);
   s.circle(x, y, ICON_R, ICON_BG);
   switch (a.kind) {
     case 0: drawFace(s, CheckIn::FROH, x, y, 22 * K, clock_); break;
@@ -460,7 +482,7 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       s.capsule(x + 15 * K, y - 9 * K, x, y + 2 * K, 1.6f * K, hex(0xc8a070));
       if (msgs_ && msgs_->unheard() > 0) {
         const float p = 0.8f + 0.2f * std::sin(clock_ * 4);
-        s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 11 * p, hex(0xff7a9a));
+        s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 13 * p * K, hex(0xff7a9a));
         s.text(fonts::small, "!", x + ICON_R * 0.75f, y - ICON_R * 0.75f - 11, hex(0x2a1a00), 1, Align::Center);
       }
       break;
@@ -475,13 +497,13 @@ void Home::drawIcon(Scene& s, const AppIcon& a, float x, float y) {
       }
       if (cardsWaiting() > 0) {   // neue Karte wartet
         const float p = 0.8f + 0.2f * std::sin(clock_ * 4);
-        s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 11 * p, GOLD);
+        s.circle(x + ICON_R * 0.75f, y - ICON_R * 0.75f, 13 * p * K, GOLD);
         s.text(fonts::small, "!", x + ICON_R * 0.75f, y - ICON_R * 0.75f - 11, hex(0x2a1a00), 1, Align::Center);
       }
       break;
     }
   }
-  s.text(fonts::small, a.kind == 4 && album_ ? album_->shortName() : a.label, x, y + ICON_R + 4, TXT_DIM, 1, Align::Center);
+  if (label) s.text(fonts::body, a.kind == 4 && album_ ? album_->shortName() : a.label, x, y + ICON_R + 6, TXT, 1, Align::Center);
 }
 
 void Home::draw(Scene& s) {
@@ -500,11 +522,32 @@ void Home::draw(Scene& s) {
     s.circle(W / 2 + 14, BUBBLE_Y + BUBBLE_H + 5, 5, bg, a);
     s.text(fonts::body, bubble_, W / 2, BUBBLE_Y + (BUBBLE_H - fonts::body.lineH) / 2 + 1, hex(0x2a1a30), a, Align::Center);
   }
-  for (int i = 0; i < nVis_; i++) {
-    float x, y;
-    iconPos(i, nVis_, x, y);
-    drawIcon(s, apps_[vis_[i]], x, y);
+  drawCarousel(s);
+}
+
+void Home::drawCarousel(Scene& s) {
+  if (!nVis_) return;
+  const float p = carPos_ - carDrag_ / CAR_DX;
+  const int c = int(std::floor(p + 0.5f));
+  // nur so viele Nachbarn, dass keine App doppelt erscheint; außen zuerst, die Mitte zuletzt
+  const int kl = nVis_ >= 3 ? 1 : 0, kr = nVis_ >= 2 ? 1 : 0;
+  int order[5], n = 0;
+  for (int k = -kl - (nVis_ >= 5 ? 1 : 0); k <= kr + (nVis_ >= 5 ? 1 : 0); k++) order[n++] = k;
+  for (int i = 0; i < n; i++)   // nach Abstand sortieren
+    for (int j = i + 1; j < n; j++)
+      if (std::fabs(c + order[j] - p) > std::fabs(c + order[i] - p)) { const int t = order[i]; order[i] = order[j]; order[j] = t; }
+  const float fade0 = s.fade;
+  for (int i = 0; i < n; i++) {
+    const float rel = c + order[i] - p, f = std::fmin(1.f, std::fabs(rel));
+    if (std::fabs(rel) > 2.2f) continue;
+    const float x = W / 2 + rel * CAR_DX, r = CAR_R * (1 - 0.4f * f);
+    s.fade = fade0 * (1 - 0.55f * f) * (1 - smooth((std::fabs(rel) - 1.4f) / 0.6f));
+    drawIcon(s, apps_[vis_[wrapi(c + order[i], nVis_)]], x, CAR_Y + 10 * f, r, f < 0.35f);
   }
+  s.fade = fade0;
+  // Punkte: wo im Karussell man gerade ist
+  const int cur = wrapi(c, nVis_);
+  for (int i = 0; i < nVis_; i++) s.circle(W / 2 + (i - (nVis_ - 1) * 0.5f) * 13, H - 18, i == cur ? 4.f : 2.6f, i == cur ? TXT : hex(0x4a5070));
 }
 
 }  // namespace dk

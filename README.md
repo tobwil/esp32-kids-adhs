@@ -23,7 +23,7 @@ Das Gerät startet schwarz, ein Tipp weckt es. Startseite ist das **Dashboard**.
 
 Regeln für das Haustier: Grummel stirbt nie, wird nie krank und macht keine Vorwürfe. Leere Bedürfnisse heißen nur, dass er freundlich um etwas bittet.
 
-Unter Grummel liegen die App-Symbole. Jede App öffnet bildschirmfüllend. Wischen nach oben oder unten blättert von App zu App, Wischen zur Seite schließt sie. Ein Abzeichen am Pferde-Symbol zeigt, dass eine neue Karte wartet.
+Unter Grummel liegt ein **App-Karussell**: eine App groß in der Mitte, links und rechts schauen die Nachbarn hervor. Das Display misst nur etwa 29 × 35 mm, ein Raster mit vielen kleinen Symbolen wäre für Kinderfinger zu klein (4 mm). Die Mitte ist etwa 8 mm groß, ihre Tippfläche etwa 13 × 14 mm. Zur Seite wischen dreht das Karussell, Tippen auf einen Nachbarn holt ihn in die Mitte, Tippen auf die Mitte öffnet die App. Das Karussell merkt sich die zuletzt gewählte App. Jede App öffnet bildschirmfüllend, Wischen nach oben oder unten blättert von App zu App, Wischen zur Seite schließt sie. Abzeichen zeigen eine neue Karte oder neue Post.
 
 | App | Was passiert |
 |---|---|
@@ -49,7 +49,8 @@ Sterne gibt es fürs Benutzen der Werkzeuge, nicht fürs „Bravsein“. Gestalt
 | Geste | Wirkung |
 |---|---|
 | Tippen, wenn das Display schwarz ist | aufwecken (das Gerät startet schwarz und geht nach 3 min Ruhe wieder aus) |
-| App-Symbol antippen | App öffnen |
+| im Karussell zur Seite wischen oder Nachbarn antippen | nächste App in die Mitte holen |
+| Mitte des Karussells antippen | App öffnen |
 | nach oben wischen | nächste App (vom Dashboard aus: die erste) |
 | nach unten wischen | vorige App, vor der ersten kommt das Dashboard |
 | nach links oder rechts wischen | App schließen, zurück zum Dashboard |

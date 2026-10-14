@@ -28,7 +28,11 @@ class Home : public Tile {
   bool wantsMotion() const override { return true; }
   bool claimsDrag() const override { return onBuddy_; }   // Streicheln öffnet keine Einstellungen
 
-  static void iconPos(int i, int n, float& x, float& y);
+  // Karussell unter Grummel: eine App groß in der Mitte (Tippfläche ≈ 13 × 12 mm), Nachbarn links und rechts.
+  // Zur Seite wischen dreht, Tippen auf die Mitte öffnet, Tippen auf einen Nachbarn holt ihn in die Mitte.
+  static constexpr float CAR_Y = 326, CAR_R = 52, CAR_DX = 136, CAR_TOP = 262;
+  bool focusApp(int tile);   // App sofort in die Mitte (Simulator)
+  int focusedTile() const;
   static void needPos(int i, float& x, float& y);
   static constexpr float BUDDY_X = W / 2, BUDDY_Y = 176, BUDDY_MAX = 80;   // Mitte bei voller Größe; kleiner steht er auf derselben Linie
   bool claimsDragAt(float x, float y) const override;
@@ -42,7 +46,10 @@ class Home : public Tile {
   void drawBuddy(Scene& s);
   void drawEgg(Scene& s);
   void drawNeeds(Scene& s);
-  void drawIcon(Scene& s, const AppIcon& a, float x, float y);
+  void drawIcon(Scene& s, const AppIcon& a, float x, float y, float r, bool label);
+  void drawCarousel(Scene& s);
+  bool carouselTap(float x, float y);
+  void carouselTick(const TileInput& in);
   int cardsWaiting() const;
   float rnd();
 
@@ -55,6 +62,9 @@ class Home : public Tile {
   float postAskT_ = 0;
   int nApps_ = 0, checkin_ = -1;
   int vis_[8] = {}, nVis_ = 0;   // sichtbare Apps (nicht abgeschaltet)
+  int carIdx_ = 0;               // Ziel: Index in vis_ (ohne Begrenzung, wird umgebrochen)
+  float carPos_ = 0, carDrag_ = 0, carStartX_ = 0;
+  bool carDragging_ = false, carFinger_ = false, started_ = false;
   uint32_t seed_ = 0x9e3779b9;
   float clock_ = 0, askT_ = 4, saveT_ = 30;
   uint32_t lastSeen_ = 0;   // ms, zuletzt auf dem Dashboard (Begrüßung nur nach längerer Pause)

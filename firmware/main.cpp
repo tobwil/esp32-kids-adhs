@@ -214,7 +214,10 @@ static void loadPack() {
 static portMUX_TYPE inMux = portMUX_INITIALIZER_UNLOCKED;
 static TouchSample touchQ[32];
 static volatile bool touchLog = false;
-static int fakeBoot = 0;   // serieller Befehl „boot“: Taste für ein paar Frames gedrückt   // „beruehrung“: Aufsetzen und Loslassen mit Position ausgeben
+static int fakeBoot = 0;   // serieller Befehl „boot“: Taste für ein paar Frames gedrückt
+// künstliche Berührungen (tipp, wisch): erst zu ihrer Zeit in die Eingabe, damit sie über mehrere Frames laufen wie ein Finger
+static TouchSample fakeTouch[24];
+static int fakeTouchN = 0;   // „beruehrung“: Aufsetzen und Loslassen mit Position ausgeben
 static int touchN = 0;
 static AccelSample accQ[128];
 static int accHead = 0, accCount = 0;
@@ -435,12 +438,10 @@ static void pollSerial() {
       }
     } else if (!strncmp(line, "wisch ", 6)) {   // künstlicher Wisch in 8 Schritten über 160 ms: wisch X0 Y0 X1 Y1
       int x0, y0, x1, y1;
-      if (sscanf(line + 6, "%d %d %d %d", &x0, &y0, &x1, &y1) == 4) {
-        portENTER_CRITICAL(&inMux);
+      if (sscanf(line + 6, "%d %d %d %d", &x0, &y0, &x1, &y1) == 4 && fakeTouchN == 0) {
         const uint32_t t0 = millis();
-        for (int k = 0; k <= 8 && touchN < 31; k++) touchQ[touchN++] = {true, int16_t(x0 + (x1 - x0) * k / 8), int16_t(y0 + (y1 - y0) * k / 8), t0 + 20u * k};
-        touchQ[touchN++] = {false, int16_t(x1), int16_t(y1), t0 + 180};
-        portEXIT_CRITICAL(&inMux);
+        for (int k = 0; k <= 8; k++) fakeTouch[fakeTouchN++] = {true, int16_t(x0 + (x1 - x0) * k / 8), int16_t(y0 + (y1 - y0) * k / 8), t0 + 33u * k};
+        fakeTouch[fakeTouchN++] = {false, int16_t(x1), int16_t(y1), t0 + 33u * 9};
       }
     } else if (!strcmp(line, "boot")) {   // BOOT-Taste drücken (Einstellungen auf/zu)
       fakeBoot = 3;
@@ -599,6 +600,14 @@ void loop() {
 
   pollSerial();
   uint32_t t0 = micros();
+  {   // fällige künstliche Berührungen einreihen
+    const uint32_t now = millis();
+    int k = 0;
+    portENTER_CRITICAL(&inMux);
+    while (k < fakeTouchN && fakeTouch[k].ms <= now && touchN < 32) touchQ[touchN++] = fakeTouch[k++];
+    portEXIT_CRITICAL(&inMux);
+    if (k) { memmove(fakeTouch, fakeTouch + k, sizeof(TouchSample) * (fakeTouchN - k)); fakeTouchN -= k; }
+  }
   portENTER_CRITICAL(&inMux);
   in.nTouch = touchN;
   memcpy(in.touch, touchQ, sizeof(TouchSample) * touchN);

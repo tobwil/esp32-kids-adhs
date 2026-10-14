@@ -291,7 +291,8 @@ static int screens(const char* dir) {
     for (auto& i : gIssues) { printf("  %s: %s\n", name, i.c_str()); nIssues++; }
   };
   auto tapFace = [&](int i) { float x, y; CheckIn::faceCenter(i, x, y); sc.tap(int(x), int(y)); };
-  auto tapIcon = [&](int i) { float x, y; Home::iconPos(i, N_APPS, x, y); sc.tap(int(x), int(y)); };
+  // App über das Karussell öffnen: in die Mitte holen, dann antippen
+  auto tapIcon = [&](int i) { kids.home.focusApp(APPS[i].tile); sc.run(0.1f); sc.tap(int(W / 2), int(Home::CAR_Y)); };
   // Wischen in 8 Schritten; mid: Bildname für ein Bild mitten im Wisch
   auto swipe = [&](int x0, int y0, int x1, int y1, const char* mid = nullptr) {
     sc.touch(true, x0, y0); sc.frame();
@@ -343,9 +344,17 @@ static int screens(const char* dir) {
   tapIcon(2); sc.run(4.0f); shot("15_atmen");
   close(); shot("16_dashboard_nach_x");
   // Wischen: nach oben blättert durch die Apps, zur Seite schließt
-  swipe(300, 400, 300, 250, "16a_wisch_hoch"); shot("16b_gefuehle");
+  // Karussell: zur Seite wischen dreht, die Mitte öffnet
+  kids.home.focusApp(T_CHECKIN); sc.run(0.3f); shot("16_karussell");
+  swipe(260, 330, 120, 330, "16_karussell_wisch"); sc.run(0.5f);
+  if (kids.home.focusedTile() != T_GRUMMEL) printf("  FEHLER: Karussell dreht nicht (Mitte %d)\n", kids.home.focusedTile()), nIssues++;
+  sc.tap(int(W - 40), int(Home::CAR_Y)); sc.run(0.5f);
+  if (kids.home.focusedTile() != T_BREATHE) printf("  FEHLER: Nachbar antippen holt ihn nicht in die Mitte (%d)\n", kids.home.focusedTile()), nIssues++;
+  if (app.current() != T_HOME) printf("  FEHLER: Karussell öffnet beim Drehen eine App (%d)\n", app.current()), nIssues++;
+  kids.home.focusApp(T_CHECKIN); sc.run(0.3f);
+  swipe(334, 250, 334, 100, "16a_wisch_hoch"); shot("16b_gefuehle");
   if (app.current() != T_CHECKIN) printf("  FEHLER: Wisch hoch auf dem Dashboard öffnet nicht Gefühle (%d)\n", app.current()), nIssues++;
-  swipe(300, 400, 300, 250); if (app.current() != T_GRUMMEL) printf("  FEHLER: Wisch hoch → Grummel (%d)\n", app.current()), nIssues++;
+  swipe(334, 250, 334, 100); if (app.current() != T_GRUMMEL) printf("  FEHLER: Wisch hoch → Grummel (%d)\n", app.current()), nIssues++;
   swipe(300, 250, 300, 400); if (app.current() != T_CHECKIN) printf("  FEHLER: Wisch runter → Gefühle (%d)\n", app.current()), nIssues++;
   swipe(300, 250, 300, 400); if (app.current() != T_HOME) printf("  FEHLER: Wisch runter → Dashboard (%d)\n", app.current()), nIssues++;
   tapIcon(5); sc.run(0.6f); swipe(300, 150, 300, 300); if (app.current() != T_ALBUM) printf("  FEHLER: Rätsel, Wisch runter → Album (%d)\n", app.current()), nIssues++;
@@ -419,7 +428,7 @@ static int screens(const char* dir) {
   { PortalSync ps; ps.frame(app, gRadio, "x", 0, sc.ms); }
   sc.run(1.0f); shot("31_sperre_radio");
   if (app.current() != T_RADIO) printf("  FEHLER: Sperre zeigt nicht das Radio (%d)\n", app.current()), nIssues++;
-  swipe(4, 250, 220, 250); swipe(300, 400, 300, 250);
+  swipe(4, 250, 220, 250); swipe(334, 250, 334, 100);
   if (app.current() != T_RADIO) printf("  FEHLER: Sperre lässt sich wegwischen (%d)\n", app.current()), nIssues++;
   sc.touch(true, 30, 230); sc.run(3.4f); if (app.settingsOpen()) printf("  FEHLER: Sperre: Einstellungen schon nach 3 s\n"), nIssues++;
   sc.run(5.0f); sc.touch(false, 30, 230); sc.frame(); sc.run(0.5f); shot("32_sperre_einstellungen");
@@ -439,7 +448,7 @@ static int screens(const char* dir) {
     app.setDisabled(1u << T_BALANCE);
     app.show(T_HOME); sc.run(0.6f); shot("33_dashboard_dinos_ohne_kugel");
     if (kids.album.pending() != 1) printf("  FEHLER: nach 3 Sternen keine Dino-Karte\n"), nIssues++;
-    for (int k = 0; k < 4; k++) swipe(300, 400, 300, 250);   // Gefühle, Grummel, Atmen, (Kugel ist aus) Album
+    for (int k = 0; k < 4; k++) swipe(334, 250, 334, 100);   // Gefühle, Grummel, Atmen, (Kugel ist aus) Album
     if (app.current() != T_ALBUM) printf("  FEHLER: Wischen überspringt abgeschaltete App nicht (%d)\n", app.current()), nIssues++;
     app.show(T_ALBUM); sc.run(0.6f); sc.tap(184, 214); sc.run(1.2f); shot("34_dino_vorne");
     sc.tap(184, 214); sc.run(0.6f); shot("35_dino_hinten");
