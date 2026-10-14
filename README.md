@@ -2,6 +2,8 @@
 
 Ein ruhiger Begleiter für Kinder auf dem **Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2)**. Er soll helfen, mit „Wut im Bauch“ umzugehen: Gefühle benennen, Wut wegfüttern, gemeinsam atmen. Dazu kommen ein ruhiges Geschicklichkeitsspiel, Rätsel für die 2. Klasse, ein Sammelalbum, ein Elternradio mit eigenen Aufnahmen und Spotify-Playlists, Sprachnachrichten mit Mama und Papa, ein sanfter Wecker und ein Nachtlicht. Gesteuert wird alles über ein Eltern-Portal im Heimnetz. Es ist eine Unterstützung im Alltag, keine Therapie.
 
+> **Neues Konzept:** Nach den ersten Wochen soll das Gerät vom Spiele- und Medien-Gerät zum ruhigen Alltagsbegleiter werden (Tageswege, sichtbare Zeit, Beruhigen mit den Eltern, Sterne fürs echte Leben). Siehe [doc/konzept-alltagsbegleiter.md](doc/konzept-alltagsbegleiter.md).
+
 ![Kinderversion im Simulator](doc/kinder-ablauf.png)
 
 Eltern-Portal (Vorführdaten, Kartenbilder gezeichnet):
